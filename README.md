@@ -20,11 +20,32 @@ PostgREST with the anon key. The two halves share no code and no credentials.
 ## The other half
 
 The Google Health sync, the derived metrics (strain, recovery, sleep score),
-the Supabase schema, and the hourly push all live in a **sibling project**,
-`pulse` (Python) — a separate, non-public repo on this machine. This repo
-only ever reads what that one writes, through the `night_summary` view; it
-never talks to Google, and it never runs Python. `sql/schema.sql` and
-`pulse/push.py`, referenced below, are in that project, not this one.
+the Supabase schema, and the hourly push all live in **[`pulse/`](pulse/)** —
+a Python project nested in this same repo, but a separate deploy target from
+everything above it. Vercel builds this repo's root (`api/`, `public/`) and
+never looks inside `pulse/`; GitHub Actions ([`.github/workflows/sync.yml`](.github/workflows/sync.yml))
+runs *only* what's inside `pulse/`, on its own hourly schedule, and never
+touches `api/` or `public/`. The PWA only ever reads what `pulse/push.py`
+writes, through the `night_summary` view — it never talks to Google, and
+never runs Python. `pulse/sql/schema.sql` and `pulse/pulse/push.py`,
+referenced below, live under that directory.
+
+## Scheduled sync
+
+`.github/workflows/sync.yml` runs `pulse sync && pulse push` hourly. It needs
+six repo secrets (**Settings → Secrets and variables → Actions**):
+
+| Secret | Where it comes from |
+|---|---|
+| `GH_CLIENT_ID`, `GH_CLIENT_SECRET` | `pulse/.env` |
+| `GH_REFRESH_TOKEN` | `pulse/.token.json`'s `refresh_token` field |
+| `PULSE_TZ` | `America/Chicago` |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | `.env.local` |
+
+`push()` recomputes and upserts *every* night in the local cache on each run,
+not just new ones — so once this workflow exists, its first run (wait for the
+next `:07`, or click **Run workflow** in the Actions tab to go now) pushes the
+entire backfilled history to Supabase in one pass. No separate manual step.
 
 ## Deploy
 
@@ -56,11 +77,10 @@ npm test
 ```
 
 `night.test.js` is the one that matters. Its expected values came out of
-Postgres 16 running `drink_night()` from the sibling project's
-`sql/schema.sql` — not out of the JavaScript. Three implementations of the
-4am rule exist (SQL there, `lib/night.js` and `public/app.js` here) and they
-have to agree, or drinks land on the wrong night and the dose-response join
-corrupts silently.
+Postgres 16 running `drink_night()` from [`pulse/sql/schema.sql`](pulse/sql/schema.sql)
+— not out of the JavaScript. Three implementations of the 4am rule exist (SQL
+there, `lib/night.js` and `public/app.js` here) and they have to agree, or
+drinks land on the wrong night and the dose-response join corrupts silently.
 
 `json-fixtures.test.js` exists because of a bug that shipped once: Python's
 `json.dump()` writes bare `NaN` by default, which is legal in Python's own

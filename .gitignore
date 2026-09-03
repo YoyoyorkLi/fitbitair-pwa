@@ -3,3 +3,19 @@ node_modules/
 .env.local
 .env*.local
 .DS_Store
+
+# ---- pulse/ (the Google Health sync, moved in from the sibling project) ----
+pulse/.venv/
+pulse/**/__pycache__/
+pulse/**/*.pyc
+pulse/pulse.db
+pulse/pulse-demo.db
+pulse/dashboard.html
+
+# Google credentials + the live refresh token. This repo is PUBLIC --
+# .token.json in particular is a standing credential, not a config value;
+# treat a leak of it the same as a leaked password.
+pulse/.env
+pulse/.env.bak.*
+pulse/.token.json
+pulse/client_secret*.json
