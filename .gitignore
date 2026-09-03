@@ -4,6 +4,11 @@ node_modules/
 .env*.local
 .DS_Store
 
+# build-preview.mjs's default output. Generated from public/ on demand, so it
+# is never the source of anything -- and at ~85kb of inlined CSS+JS it makes
+# every diff that touches a chart unreadable.
+preview.html
+
 # ---- pulse/ (the Google Health sync, moved in from the sibling project) ----
 pulse/.venv/
 pulse/**/__pycache__/

@@ -19,9 +19,22 @@ body{
 [hidden]{display:none!important}
 a{color:var(--accent)}
 
-.top{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:14px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
 .brand{font-size:23px;font-weight:700;letter-spacing:-.02em;margin:0}
-.stamp{color:var(--muted);font-size:12.5px}
+
+/* Night selector. The ‹ › targets are 34px square — below Apple's 44px advice
+   on paper, but they sit in the header with nothing adjacent to mis-hit, and a
+   44px control here would crowd the brand off a 320px screen. Arrow keys and
+   the swipe gesture are the other two ways in. */
+.daynav{display:flex;align-items:center;gap:2px}
+.nav{background:var(--panel);border:1px solid var(--grid);color:var(--text);
+  width:34px;height:34px;line-height:1;font-size:19px;padding:0;border-radius:6px;
+  display:flex;align-items:center;justify-content:center}
+.nav:disabled{opacity:.32;cursor:default}
+.stamp{background:none;border:0;color:var(--muted);font:inherit;font-size:12.5px;
+  padding:6px 8px;min-width:104px;text-align:center;font-variant-numeric:tabular-nums}
+/* Only looks tappable once tapping it would do something. */
+.daynav.stepped .stamp{color:var(--accent);text-decoration:underline;text-underline-offset:3px}
 
 .tabs{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}
 .tab{background:var(--panel);border:1px solid var(--grid);color:var(--muted);border-radius:999px;
@@ -56,24 +69,29 @@ a{color:var(--accent)}
 .card h2{font-size:11.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);margin:0 0 14px;font-weight:600}
 .note{color:var(--muted);font-size:13px;margin:12px 0 0;line-height:1.5}
 .note b{color:var(--text);font-weight:500}
-/* Charts are authored at a 680-unit internal viewBox so their labels stay
-   legible at native scale; a real phone's content column is ~305px, so the
-   520px floor guarantees horizontal scroll there (worst case ~0.76x shrink,
-   not ~0.45x if it were left to fit the container -- the difference between
-   readable and not). That scroll was silent: no signal a chart continued
-   past the edge, so a phone showed what looked like a cropped, broken chart
-   by default. The gradient below is that missing signal, not a size change --
-   position:relative on .chartbox anchors the ::after over its right edge. */
-.chartbox{overflow-x:auto;position:relative}
-.chartbox svg{display:block;width:100%;min-width:520px;height:auto}
-.kpi .chartbox,.kpi svg{min-width:0}
-.chartbox::after{
-  content:"";position:absolute;top:0;right:0;bottom:0;width:28px;
-  background:linear-gradient(to right, transparent, var(--panel));
-  pointer-events:none;opacity:1;transition:opacity .15s;
+/* Charts are authored at the measured pixel width of this box (charts.js takes
+   W as an argument), so the viewBox is 1:1 with CSS pixels and font-size 10.5
+   is 10.5px on every device. That is what retired the old min-width:520px and
+   its horizontal scroll — the scroll only ever existed to stop a fixed 680-unit
+   viewBox shrinking type to ~4px on a phone. Nothing here scrolls sideways now,
+   so there is no edge-fade to signal either. */
+.chartbox svg{display:block;width:100%;height:auto}
+/* Horizontal drag belongs to the scrubber; vertical still scrolls the page. */
+.chartbox svg[data-scrub]{touch-action:pan-y;cursor:crosshair}
+
+/* Where a scrubbed value lands: pinned under the card title, above the chart,
+   so a thumb on the chart is never on top of the number it just asked for.
+   Reserves its own line whether or not it is populated — a row that appears on
+   touch would shove every chart down the page mid-drag. */
+.readout{
+  min-height:19px;margin:-8px 0 10px;font-size:12.5px;line-height:1.45;
+  color:var(--dim);font-variant-numeric:tabular-nums;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-.chartbox.at-end::after{opacity:0}
-.kpi .chartbox::after{content:none}
+.readout b{color:var(--muted);font-weight:600}
+.readout span::before{content:" · "}
+.readout.live{color:var(--muted)}
+.readout.live b{color:var(--text)}
 
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .stat{background:var(--panel2);border-radius:5px;padding:14px 8px;text-align:center}
@@ -114,5 +132,24 @@ h1{font-size:22px;font-weight:600;letter-spacing:-.01em;margin:0}
   .kpi{padding:12px 4px 10px}
   .kpi svg{width:100%;max-width:120px}
   .stats{grid-template-columns:repeat(2,1fr)}
+  .brand{font-size:20px}
+  .stamp{min-width:92px;padding:6px 4px}
+  /* Five zone tiles on one row is 55px each at 320px wide; the numbers survive
+     that, the uppercase labels do not. */
+  .card .stats[style]{gap:6px}
+  .stat{padding:12px 4px}
+  .stat .k{font-size:9px;letter-spacing:.04em}
+  /* Two lines rather than an ellipsis: "Aug 26 · strain 7.97 · target
+     12.8–15.8 · 5 drinks" does not fit 320px on one line, and the clipped half
+     was always the drink count. The height is reserved either way, so a long
+     value cannot shove the chart down the page mid-drag. */
+  .readout{
+    white-space:normal;min-height:36px;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  }
+}
+@media (max-width:360px){
+  .daynav{gap:0}
+  .nav{width:30px;height:30px;font-size:17px}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}

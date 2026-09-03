@@ -31,13 +31,20 @@
 </section>
 
 <section id="dash" class="screen" hidden>
+  <!-- The night selector. Every panel on the Day and Sleep tabs is scoped to
+       one night, so the date is a control, not a caption. Tapping the date
+       itself jumps back to the newest night. -->
   <div class="top">
     <p class="brand">Pulse</p>
-    <span class="stamp" id="stamp"></span>
+    <div class="daynav" id="daynav">
+      <button class="nav" id="day-prev" type="button" aria-label="Previous night">‹</button>
+      <button class="stamp" id="stamp" type="button"></button>
+      <button class="nav" id="day-next" type="button" aria-label="Next night">›</button>
+    </div>
   </div>
 
   <div class="tabs" role="tablist">
-    <button class="tab" role="tab" aria-selected="true"  data-tab="today">Today</button>
+    <button class="tab" role="tab" aria-selected="true"  data-tab="today">Day</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="sleep">Sleep</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="trends">Trends</button>
   </div>
