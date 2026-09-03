@@ -56,9 +56,24 @@ a{color:var(--accent)}
 .card h2{font-size:11.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);margin:0 0 14px;font-weight:600}
 .note{color:var(--muted);font-size:13px;margin:12px 0 0;line-height:1.5}
 .note b{color:var(--text);font-weight:500}
-.chartbox{overflow-x:auto}
+/* Charts are authored at a 680-unit internal viewBox so their labels stay
+   legible at native scale; a real phone's content column is ~305px, so the
+   520px floor guarantees horizontal scroll there (worst case ~0.76x shrink,
+   not ~0.45x if it were left to fit the container -- the difference between
+   readable and not). That scroll was silent: no signal a chart continued
+   past the edge, so a phone showed what looked like a cropped, broken chart
+   by default. The gradient below is that missing signal, not a size change --
+   position:relative on .chartbox anchors the ::after over its right edge. */
+.chartbox{overflow-x:auto;position:relative}
 .chartbox svg{display:block;width:100%;min-width:520px;height:auto}
 .kpi .chartbox,.kpi svg{min-width:0}
+.chartbox::after{
+  content:"";position:absolute;top:0;right:0;bottom:0;width:28px;
+  background:linear-gradient(to right, transparent, var(--panel));
+  pointer-events:none;opacity:1;transition:opacity .15s;
+}
+.chartbox.at-end::after{opacity:0}
+.kpi .chartbox::after{content:none}
 
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .stat{background:var(--panel2);border-radius:5px;padding:14px 8px;text-align:center}

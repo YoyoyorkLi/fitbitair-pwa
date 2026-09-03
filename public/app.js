@@ -68,6 +68,31 @@ function bindTips(root) {
   });
 }
 
+// Every chart wider than its card scrolls horizontally with no visual signal
+// that there's more past the edge -- on a real phone that reads as a cropped,
+// broken chart rather than an intentionally scrollable one. `.at-end` (see
+// styles.css) fades the right-edge gradient once you've actually scrolled to
+// see everything.
+//
+// Split in two on purpose. The listener is call-once, like bindTips: `scroll`
+// doesn't bubble but IS dispatched in the capture phase, so one delegated
+// listener on #dash covers every .chartbox for the life of the page, present
+// now or added later by a range-toggle re-render, with nothing to rebind.
+// But a chart that already fits its card never fires a scroll event at all --
+// nothing would ever clear its gradient -- so the sync pass below has to
+// re-run every time NEW chart markup lands, not just once at boot.
+function bindScrollFades(root) {
+  root.addEventListener("scroll", (e) => {
+    if (e.target instanceof Element && e.target.classList.contains("chartbox")) syncScrollFades(e.target);
+  }, true);
+}
+function syncScrollFades(root) {
+  const boxes = root.classList?.contains("chartbox") ? [root] : root.querySelectorAll(".chartbox");
+  boxes.forEach((box) => {
+    box.classList.toggle("at-end", box.scrollLeft + box.clientWidth >= box.scrollWidth - 2);
+  });
+}
+
 // --------------------------------------------------------------------- boot
 async function boot() {
   const params = new URLSearchParams(location.search);
@@ -315,6 +340,8 @@ function render() {
   });
 
   bindTips($("dash"));
+  bindScrollFades($("dash"));
+  syncScrollFades($("dash"));
 }
 
 const RANGE_PRESETS = [7, 14, 30, 90];
@@ -337,6 +364,7 @@ function renderTrendCharts(D, days) {
       "Worth reading against strain: high steps with low strain is a long walk; the reverse is a hard session.")}
     ${card(`Sleep score — ${days} nights`, ch.sparkline(D, D.score, col("rem"), days, ""),
       "Treat with suspicion on drinking nights: front-loaded slow-wave sleep holds the score up while REM collapses.")}`;
+  syncScrollFades($("trend-cards"));
 }
 
 // --------------------------------------------------------------------- tabs
@@ -345,6 +373,11 @@ for (const btn of document.querySelectorAll(".tab")) {
     for (const b of document.querySelectorAll(".tab")) b.setAttribute("aria-selected", String(b === btn));
     for (const id of ["today", "sleep", "trends"]) $(id).hidden = id !== btn.dataset.tab;
     tip.hidden = true;
+    // A hidden tab's charts have clientWidth/scrollWidth of 0 (display:none),
+    // so the sync at render() time can only read the initially-visible tab
+    // correctly -- every other tab's fade gets stuck wherever that 0/0 pass
+    // left it. Re-run now that this tab's real layout exists.
+    syncScrollFades($(btn.dataset.tab));
   });
 }
 
