@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pulse — Privacy Policy</title>
+<meta name="theme-color" content="#0B0E14">
+<style>
+:root{--bg:#0B0E14;--panel:#141924;--grid:#252C3B;--text:#E6EAF2;--muted:#7E8AA3;--accent:#5B8DEF;
+      color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+     font:400 16px/1.65 ui-sans-serif,-apple-system,"Segoe UI",system-ui,sans-serif;
+     padding:56px 22px 90px}
+main{max-width:64ch;margin:0 auto}
+h1{font-size:27px;font-weight:600;letter-spacing:-.02em;margin:0 0 6px}
+.sub{color:var(--muted);margin:0 0 36px;font-size:14.5px}
+h2{font-size:12px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);
+   font-weight:600;margin:36px 0 10px;padding-top:18px;border-top:1px solid var(--grid)}
+p{margin:0 0 14px}
+ul{margin:0 0 14px;padding-left:22px}
+li{margin-bottom:7px}
+strong{font-weight:600}
+a{color:var(--accent)}
+code{background:var(--panel);padding:1px 6px;border-radius:3px;font-size:.88em}
+</style>
+</head>
+<body>
+<main>
+  <h1>Privacy Policy</h1>
+  <p class="sub">Pulse · last updated 3 September 2026</p>
+
+  <p>Pulse is a personal health dashboard built and run by one person for their own use.
+     It has a single user. It is not a commercial service, it has no customers, and it
+     does not accept sign-ups.</p>
+
+  <h2>What it collects</h2>
+  <p>With your explicit Google account consent, Pulse reads the following from the
+     Google Health API:</p>
+  <ul>
+    <li>Heart rate samples</li>
+    <li>Sleep sessions and their stages</li>
+    <li>Daily resting heart rate, heart rate variability, respiratory rate and blood oxygen</li>
+    <li>Step counts</li>
+  </ul>
+  <p>It also records drink entries that you log yourself by tapping an NFC tag: a timestamp,
+     a drink type, and a standard-drink count.</p>
+
+  <h2>What it does with it</h2>
+  <p>Computes derived metrics — strain, recovery, sleep score, sleep debt — and draws charts.
+     Nothing else. There is no profiling, no advertising, no model training, and no automated
+     decision-making.</p>
+
+  <h2>Where it is stored</h2>
+  <p>In a private Supabase (PostgreSQL) database owned by the operator, and in a local
+     SQLite cache on the operator's own machine. Access is restricted by row-level security
+     to a single authenticated account.</p>
+  <p>Google API credentials and the refresh token are held as encrypted environment
+     variables on Vercel and GitHub, and in a local file with <code>0600</code> permissions.
+     They are never sent to the browser.</p>
+
+  <h2>Who it is shared with</h2>
+  <p><strong>Nobody.</strong> Health data is never sold, shared, transferred, or disclosed to
+     any third party. There are no analytics, no trackers, no advertising networks, and no
+     third-party scripts beyond the JavaScript library used to talk to the database.</p>
+  <p>Data is not used to build any product other than this dashboard, and never leaves the
+     operator's own infrastructure.</p>
+
+  <h2>Google user data</h2>
+  <p>Pulse's use of information received from Google APIs adheres to the
+     <a href="https://developers.google.com/terms/api-services-user-data-policy" rel="noopener">Google API Services
+     User Data Policy</a>, including the Limited Use requirements. Google Health data is used
+     solely to display the user's own metrics back to them.</p>
+
+  <h2>Retention and deletion</h2>
+  <p>Data is kept only while it is useful for trend analysis. You can revoke Pulse's access at
+     any time at <a href="https://myaccount.google.com/permissions" rel="noopener">myaccount.google.com/permissions</a>,
+     which immediately stops all further access. To erase what has already been stored, delete
+     the Supabase project — that removes every record permanently.</p>
+
+  <h2>Cookies</h2>
+  <p>None. A session token is kept in your browser's local storage so you do not have to sign in
+     on every visit. It is never transmitted anywhere except the database that issued it.</p>
+
+  <h2>Contact</h2>
+  <p>Questions about this policy go to the operator at the support email listed on the Google
+     consent screen.</p>
+</main>
+</body>
+</html>

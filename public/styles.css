@@ -1,0 +1,103 @@
+/* Pulse — palette lifted from pulse/config.py so the PWA and the Python-rendered
+   charts stay one design system. Dark only, on purpose: this is read in bed. */
+:root{
+  --bg:#0B0E14; --panel:#141924; --panel2:#1C2230; --grid:#252C3B;
+  --text:#E6EAF2; --muted:#7E8AA3; --dim:#5A6478;
+  --deep:#3B4EE0; --light:#5B8DEF; --rem:#9B5BEF; --awake:#F2A93B;
+  --strain:#2FD4C6; --good:#3FD68A; --warn:#F2545B; --accent:#5B8DEF;
+  --drink:#C4862E; --steps:#4FB8A8;
+  --sans:ui-sans-serif,-apple-system,"Segoe UI",system-ui,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font:400 15px/1.55 var(--sans);
+  padding:max(22px,env(safe-area-inset-top)) 16px max(40px,env(safe-area-inset-bottom));
+}
+.screen{max-width:760px;margin:0 auto}
+[hidden]{display:none!important}
+a{color:var(--accent)}
+
+.top{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:14px}
+.brand{font-size:23px;font-weight:700;letter-spacing:-.02em;margin:0}
+.stamp{color:var(--muted);font-size:12.5px}
+
+.tabs{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}
+.tab{background:var(--panel);border:1px solid var(--grid);color:var(--muted);border-radius:999px;
+     padding:9px 22px;font:inherit;font-size:14px;cursor:pointer}
+.tab[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--bg);font-weight:600}
+.tab:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* The Trends range toggle: smaller and quieter than .tab, since it governs
+   the cards below it rather than switching the whole screen. */
+.range{display:flex;gap:6px;margin:-2px 0 14px}
+.rbtn{background:var(--panel);border:1px solid var(--grid);color:var(--muted);border-radius:6px;
+  padding:5px 12px;font:inherit;font-size:12.5px;font-variant-numeric:tabular-nums}
+.rbtn[aria-selected="true"]{background:var(--panel2);border-color:var(--accent);color:var(--text);font-weight:600}
+
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}
+.kpi{background:var(--panel);border:1px solid var(--grid);border-radius:6px;padding:16px 8px 14px;text-align:center}
+.kpi svg{display:block;margin:0 auto;width:130px;height:104px}
+.kpi .cap{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:8px 0 2px}
+.kpi .sub{font-size:11.5px;color:var(--dim);margin:0}
+
+/* Drinks annotate the day; they are not a fourth vital sign. */
+.strip{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:var(--panel);
+  border:1px solid var(--grid);border-left:2px solid var(--drink);border-radius:0 6px 6px 0;
+  padding:13px 16px;margin-bottom:14px;font-size:14px}
+.strip .n{font-size:19px;font-weight:600;color:var(--drink);font-variant-numeric:tabular-nums}
+.strip .txt{color:var(--muted)}
+.strip .txt b{color:var(--text);font-weight:500}
+.pips{display:flex;gap:4px}
+.pips i{width:7px;height:18px;border-radius:2px;background:var(--drink);display:block}
+
+.card{background:var(--panel);border:1px solid var(--grid);border-radius:6px;padding:18px;margin-bottom:14px}
+.card h2{font-size:11.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);margin:0 0 14px;font-weight:600}
+.note{color:var(--muted);font-size:13px;margin:12px 0 0;line-height:1.5}
+.note b{color:var(--text);font-weight:500}
+.chartbox{overflow-x:auto}
+.chartbox svg{display:block;width:100%;min-width:520px;height:auto}
+.kpi .chartbox,.kpi svg{min-width:0}
+
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.stat{background:var(--panel2);border-radius:5px;padding:14px 8px;text-align:center}
+.stat .v{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.15}
+.stat .k{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:5px}
+
+.banner{background:var(--panel);border-left:2px solid var(--muted);padding:12px 16px;margin-bottom:14px;
+  font-size:13.5px;color:var(--muted);border-radius:0 4px 4px 0}
+.banner b{color:var(--text);font-weight:500}
+
+/* sign in */
+.stack{display:flex;flex-direction:column;gap:14px;margin:22px 0}
+.field{display:flex;flex-direction:column;gap:6px}
+.field span{color:var(--muted);font-size:13px}
+input{background:var(--panel2);border:1px solid var(--grid);border-radius:5px;color:var(--text);
+  /* 16px minimum or iOS zooms the viewport on focus and never zooms back. */
+  font:inherit;font-size:16px;padding:13px 14px;width:100%}
+button{font:inherit;cursor:pointer;border-radius:5px}
+.primary{background:var(--accent);color:var(--bg);border:0;padding:14px;font-weight:600;width:100%}
+.primary:disabled{opacity:.5;cursor:default}
+.hint{color:var(--dim);font-size:13px;margin:0}
+.error{color:var(--warn);font-size:14px;margin:0}
+h1{font-size:22px;font-weight:600;letter-spacing:-.01em;margin:0}
+
+/* One tooltip element for the whole page; charts opt in with data-tip. */
+.tip{
+  position:fixed;z-index:50;pointer-events:none;
+  background:var(--panel2);border:1px solid var(--grid);border-radius:5px;
+  padding:8px 11px;font-size:12.5px;line-height:1.45;
+  box-shadow:0 6px 20px rgba(0,0,0,.45);max-width:250px;
+}
+.tip .h{display:block;color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+.tip .d{display:block;color:var(--muted);font-variant-numeric:tabular-nums}
+[data-tip]{cursor:crosshair}
+
+@media (max-width:560px){
+  .kpis{grid-template-columns:repeat(3,1fr);gap:8px}
+  .kpi{padding:12px 4px 10px}
+  .kpi svg{width:100%;max-width:120px}
+  .stats{grid-template-columns:repeat(2,1fr)}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}

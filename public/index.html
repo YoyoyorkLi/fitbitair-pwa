@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Pulse</title>
+<meta name="theme-color" content="#0B0E14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pulse">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<!-- Password, not magic link: a magic link opens in Safari and sets the session
+     in Safari's storage, a different partition from this home-screen app. -->
+<section id="signin" class="screen" hidden>
+  <h1>Pulse</h1>
+  <form id="signin-form" class="stack">
+    <label class="field"><span>Email</span>
+      <input type="email" name="email" autocomplete="username" required inputmode="email"></label>
+    <label class="field"><span>Password</span>
+      <input type="password" name="password" autocomplete="current-password" required></label>
+    <button type="submit" class="primary">Sign in</button>
+    <p id="signin-error" class="error" role="alert" hidden></p>
+  </form>
+  <p class="hint">Or open <a href="?demo=1">the demo</a> to see the dashboard with synthetic data.</p>
+</section>
+
+<section id="dash" class="screen" hidden>
+  <div class="top">
+    <p class="brand">Pulse</p>
+    <span class="stamp" id="stamp"></span>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" aria-selected="true"  data-tab="today">Today</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="sleep">Sleep</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="trends">Trends</button>
+  </div>
+
+  <div class="banner" id="demo-banner" hidden>
+    <b>Synthetic data</b> — from <code>pulse demo</code>, with the documented alcohol effect on HRV,
+    REM and resting HR simulated on nights that have drinks. Shows the shape, not your numbers.
+  </div>
+
+  <div id="today"></div>
+  <div id="sleep" hidden></div>
+  <div id="trends" hidden></div>
+</section>
+
+<section id="loading" class="screen">
+  <p class="hint">Loading…</p>
+</section>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>
