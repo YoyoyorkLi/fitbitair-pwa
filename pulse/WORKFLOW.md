@@ -122,32 +122,117 @@ You have already created the OAuth client. Three things left to confirm.
 Skipping this gives you a successful login followed by a baffling 403 on every
 data call.
 
-### 2b. Publish the app  ← the one people miss
+### 2b. Publish the app — tried, and it doesn't work on a free domain
 
-**Google Auth Platform → Audience.** If status is **Testing**, click
-**Publish app**.
+**This whole section turned out wrong.** Publishing is *not* a free status
+flag for this app, and after actually going through it, staying in Testing is
+the real, permanent answer here — not a workaround, the destination. Left the
+full story below because the reasoning is worth having next time this comes
+up, rather than relearning it.
 
-| Status | Consequence |
-|---|---|
-| Testing | Authorisations, **including the refresh token**, expire 7 days after consent. You re-login every week forever. |
-| In production, unverified | Still shows the "Google hasn't verified this app" warning. Still capped at 100 users. **No 7-day clock.** |
+**What "just publish" assumed, and where that breaks.** For an app requesting
+ordinary scopes, **Google Auth Platform → Audience → Publish app** genuinely
+is a free status flip. But `googlehealth.*` scopes are classified *sensitive*
+(real health data), and for sensitive scopes, publishing routes you through
+an actual **brand verification review**, not a toggle. That review flagged
+four things, in order:
 
-Publishing submits nothing for review and costs nothing.
+1. App name **"Fitbit Air"** — that's Google's own product name; naming your
+   app after it reads as brand impersonation.
+2. App name doesn't match the name on the home page — direct consequence of #1.
+3. The logo doesn't identify a distinct brand — a logo was uploaded that had
+   no reason to be there for a single-user tool; removed.
+4. **"The website of your home page URL is not registered to you."** This is
+   the one that stuck.
 
-**Changed since this was written.** It is no longer only a status flag: Google now
-blocks the **Publish app** button until **Branding** has an app name, a support
-email, an **application home page URL** and a **privacy policy URL**. The button
-is greyed out with a tooltip saying so. Both URLs must be live and reachable.
+Issues 1–3 are a five-minute fix (rename the app, e.g. to `Pulse`; remove the
+logo) and resolved cleanly.
 
-Deploy `web/` to Vercel first, then fill in:
+**Issue 4 did not resolve, and here's why it structurally can't.** The home
+page was `https://<project>.vercel.app` — a subdomain of `vercel.app`, which
+is registered on the [Public Suffix List](https://publicsuffix.org/): the
+registry browsers and platforms use to mark shared, multi-tenant hosting
+domains (same category as `github.io`, `netlify.app`) where no single
+subdomain is treated as owning the parent. Proof was pursued two different
+ways:
+
+- **Google Cloud's own "Authorized domains" field on the Branding page**
+  rejects the bare `vercel.app` outright: *"Invalid domain: must be a top
+  private domain."* Adding the specific subdomain (`your-project.vercel.app`)
+  IS accepted there with no error.
+- **Google Search Console** was verified via the HTML-tag / URL-prefix method
+  (proves you control the *content* at that exact URL) — genuinely succeeded,
+  confirmed "Ownership verified."
+
+Resubmitted for re-verification anyway, since Search Console passing was real
+new evidence. **Same "not registered to you" error came back regardless.**
+Two independent proofs of content ownership, both accepted by their own
+respective systems, and the branding reviewer still refused the domain. That
+combination is conclusive: this isn't a technical gap to route around, it's
+Google's OAuth brand policy deliberately excluding shared-hosting domains as
+a matter of policy, specifically because *anyone* can spin up a
+`*.vercel.app` subdomain — allowing one to count as a "home page" would let
+any app claim an established web presence it doesn't actually have. No amount
+of resubmission changes that. **Stop trying if you land here again; it will
+not pass without an independently-owned domain.**
+
+**Other routes considered and ruled out**, for the record:
+- **Google Workspace "Internal" app type** (skips verification entirely) —
+  real mechanism, only available if the account is on a paid Workspace
+  organization. A personal `@gmail.com` can't use it, and Workspace costs
+  more per month than a domain costs per year regardless.
+- **A different free/shared subdomain service** — same Public Suffix problem
+  in a different costume; solves nothing.
+- **Automating the human consent step itself** (headless browser, stored
+  Google password) — not attempted, on purpose. Storing a password in a
+  script is exactly the failure mode OAuth exists to prevent, and Google
+  actively detects and blocks automated login — the likely outcome is the
+  account getting flagged, not a working pipeline.
+- **Dropping to non-sensitive scopes** to dodge the review — would lose most
+  of what the app actually does (steps, sleep, HRV). Removes the reason the
+  project exists to dodge a 30-second weekly task.
+
+**The two paths that do work, if this ever needs revisiting:**
+- **A real, independently-registered domain** (~$10–13/yr at cost, e.g.
+  Cloudflare Registrar or Porkbun — avoid teaser-priced TLDs that jump in
+  price after year one) pointed at the deployment. Removes the 7-day cycle
+  permanently once verified.
+- **GitHub Student Developer Pack**, if eligible — includes a free Namecheap
+  domain for a year, same effect at zero cost for that year.
+
+**What's actually running instead — see 2d below.**
+
+Either way, Branding needs a home page and privacy policy URL before
+`Publish app` is even clickable — the fields are still worth having filled in
+correctly regardless of which path you take:
 
 | Branding field | Value |
 |---|---|
-| Application home page | `https://<your-app>.vercel.app` |
-| Application privacy policy link | `https://<your-app>.vercel.app/privacy.html` |
+| Application home page | `https://fitbitair-pwa.vercel.app` |
+| Application privacy policy link | `https://fitbitair-pwa.vercel.app/privacy.html` |
 
-`web/public/privacy.html` exists for exactly this. Until then use **2c** below —
-test users need none of it.
+(`public/privacy.html` in this repo's root, not `pulse/` — exists for exactly this.)
+
+### 2d. Living with Testing mode — `refresh_login.sh`
+
+Testing-mode consent, **including the refresh token**, expires 7 days after
+the last full login — not 7 days of inactivity, 7 days flat, no matter how
+often the access token silently refreshes in between. That's the entire
+remaining cost of not pursuing 2b further:
+
+```bash
+./refresh_login.sh
+```
+
+Opens the browser, you click through Google's consent screen once (the
+"hasn't verified this app" warning is expected — Advanced → Continue), and it
+either updates the `GH_REFRESH_TOKEN` GitHub secret directly (if `gh` is
+installed and authed) or prints the new token ready to paste in by hand at
+**Settings → Secrets and variables → Actions** on the repo.
+
+Run it roughly once a week, comfortably before the 7-day mark. If it's ever
+forgotten and the sync starts failing, the PWA's own sync-staleness banner is
+the safety net that surfaces it.
 
 ### 2c. Test user + scopes
 
@@ -353,6 +438,18 @@ It is one ~80 kB file. Genuinely fine for occasional use.
 ---
 
 ## Step 8 — Automate
+
+**What's actually running: GitHub Actions**, not this section. See
+[`../.github/workflows/sync.yml`](../.github/workflows/sync.yml) — hourly,
+`pulse sync && pulse push`, six repo secrets (documented in the repo root
+[`README.md`](../README.md)). Keeping it alive is exactly [2d above](#2d-living-with-testing-mode--refresh_loginsh):
+`refresh_login.sh` weekly, nothing else.
+
+The `launchd` approach below is the alternative for running this **entirely
+on a Mac**, with no GitHub Actions and no repo secrets involved at all — never
+switched to, since Actions covers it without needing this machine to stay on.
+Left here in case that trade-off (own machine, own uptime, no cloud secrets)
+is ever preferred over the current setup.
 
 `cron` on modern macOS needs Full Disk Access, so `launchd` is more reliable.
 Because credentials live in `.env`, the plist does not need to carry them.
