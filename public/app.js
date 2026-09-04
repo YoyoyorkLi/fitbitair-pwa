@@ -720,7 +720,7 @@ function renderDay() {
       ${stat(ok(sn.asleep) ? hm(sn.asleep) : "—", "Asleep")}${stat(ok(sn.eff) ? sn.eff + "%" : "—", "Efficiency")}
       ${stat(ok(sn.need) ? hm(sn.need) : "—", "Needed")}${stat(ok(sn.score) ? sn.score : "—", "Sleep score", sn.score >= 80 ? col("good") : col("awake"))}
     </div></div>
-    ${card("Hypnogram", ch.hypnogram(W, hyp), "", false)}
+    ${card("Hypnogram", ch.hypnogram(W, hyp))}
     ${card("Stages vs your 30-night baseline", ch.stagesVsBaseline(W, D, sn), "", false)}
     ${card(`Sleep consistency — last ${colDays} nights`, ch.sleepColumns(W, D, colDays))}
     ${card(`Sleep debt — ${debtDays} days`, ch.debtArea(W, D, debtDays))}`;

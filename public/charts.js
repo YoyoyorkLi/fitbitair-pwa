@@ -141,19 +141,19 @@ function arcPath(cx, cy, r, a0, a1) {
 }
 
 export function gauge(v, max, c, label, tip) {
-  const cx = 65, cy = 68, r = 44, a0 = Math.PI * 0.78, a1 = Math.PI * 2.22;
+  const cx = 65, cy = 67, r = 47, a0 = Math.PI * 0.78, a1 = Math.PI * 2.22;
   const f = ok(v) ? Math.max(0, Math.min(1, v / max)) : 0;
   return svg(130, 104, `
-    <path d="${arcPath(cx, cy, r, a0, a1)}" fill="none" stroke="${col("panel2")}" stroke-width="9" stroke-linecap="round"/>
-    ${ok(v) ? `<path d="${arcPath(cx, cy, r, a0, a0 + (a1 - a0) * f)}" fill="none" stroke="${c}" stroke-width="9" stroke-linecap="round"/>` : ""}
-    <text x="${cx}" y="${cy + 7}" text-anchor="middle" fill="${col(ok(v) ? "text" : "dim")}" font-size="27" font-weight="600"
+    <path d="${arcPath(cx, cy, r, a0, a1)}" fill="none" stroke="${col("panel2")}" stroke-width="10" stroke-linecap="round"/>
+    ${ok(v) ? `<path d="${arcPath(cx, cy, r, a0, a0 + (a1 - a0) * f)}" fill="none" stroke="${c}" stroke-width="10" stroke-linecap="round"/>` : ""}
+    <text x="${cx}" y="${cy + 9}" text-anchor="middle" fill="${col(ok(v) ? "text" : "dim")}" font-size="34" font-weight="600"
       font-family="${SANS}" style="font-variant-numeric:tabular-nums">${ok(v) ? v : "—"}</text>
     <circle cx="${cx}" cy="${cy}" r="${r + 6}" fill="transparent" data-tip="${esc(tip)}"/>`,
     `${label} ${ok(v) ? v : "not available"} of ${max}`);
 }
 
 export function ring(v, c, label, tip) {
-  const cx = 65, cy = 54, r = 40, circ = 2 * Math.PI * r;
+  const cx = 65, cy = 54, r = 43, circ = 2 * Math.PI * r;
   // A caller with no score yet (before tonight's sleep has synced) used to
   // pass a fallback 0, which drew a real-looking empty ring with a giant "0"
   // -- indistinguishable from an actual bad night. And a non-numeric v would
@@ -161,19 +161,19 @@ export function ring(v, c, label, tip) {
   // fixed in strainHistory. Draw an honest "no data yet" state instead.
   if (!ok(v)) {
     return svg(130, 104, `
-      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${col("panel2")}" stroke-width="9"
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${col("panel2")}" stroke-width="10"
         stroke-dasharray="3 5"/>
-      <text x="${cx}" y="${cy + 9}" text-anchor="middle" fill="${col("dim")}" font-size="22" font-weight="600"
+      <text x="${cx}" y="${cy + 11}" text-anchor="middle" fill="${col("dim")}" font-size="28" font-weight="600"
         font-family="${SANS}">—</text>
       <circle cx="${cx}" cy="${cy}" r="${r + 6}" fill="transparent" data-tip="${esc(tip)}"/>`,
       `${label}: not yet available`);
   }
   const f = Math.max(0, Math.min(1, v / 100));
   return svg(130, 104, `
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${col("panel2")}" stroke-width="9"/>
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${c}" stroke-width="9" stroke-linecap="round"
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${col("panel2")}" stroke-width="10"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${c}" stroke-width="10" stroke-linecap="round"
       stroke-dasharray="${(circ * f).toFixed(1)} ${circ.toFixed(1)}" transform="rotate(-90 ${cx} ${cy})"/>
-    <text x="${cx}" y="${cy + 9}" text-anchor="middle" fill="${col("text")}" font-size="26" font-weight="600"
+    <text x="${cx}" y="${cy + 11}" text-anchor="middle" fill="${col("text")}" font-size="33" font-weight="600"
       font-family="${SANS}" style="font-variant-numeric:tabular-nums">${v}</text>
     <circle cx="${cx}" cy="${cy}" r="${r + 6}" fill="transparent" data-tip="${esc(tip)}"/>`,
     `${label} ${v} of 100`);
@@ -187,6 +187,11 @@ export function ring(v, c, label, tip) {
 // chart is that alcohol shows up as *structure*: deep sleep front-loaded,
 // REM pushed late and short, awakenings clustered in the second half.
 const LEVEL = { AWAKE: 0, REM: 1, LIGHT: 2, DEEP: 3 };
+// "Rem" is not a word. Title-casing the others and leaving the acronym alone
+// is the whole rule, and it is worth the three lines to not print it wrong.
+const STAGE_NAME = { AWAKE: "Awake", REM: "REM", LIGHT: "Light", DEEP: "Deep" };
+/** "0h 01m" reads badly for a one-minute block; under an hour, drop the hours. */
+const dur = (m) => (m < 60 ? `${Math.round(m)}m` : hm(m));
 
 export function hypnogram(W, h, ht = 244) {
   if (!h?.segs?.length) {
@@ -222,7 +227,7 @@ export function hypnogram(W, h, ht = 244) {
 
   for (const s of h.segs) {
     const x0 = X(s.a), wd = Math.max(X(s.b) - x0, 1.4);
-    const tip = `${s.t[0] + s.t.slice(1).toLowerCase()} · ${hm(s.b - s.a)}|${clock(s.a)} – ${clock(s.b)}`;
+    const tip = `${STAGE_NAME[s.t] || s.t} · ${dur(s.b - s.a)}|${clock(s.a)} – ${clock(s.b)}`;
     p += `<rect x="${x0.toFixed(1)}" y="${Y(LEVEL[s.t]).toFixed(1)}" width="${wd.toFixed(1)}"
       height="${bar.toFixed(1)}" rx="${Math.min(2.5, wd / 2).toFixed(1)}" fill="${COL[s.t]}" data-tip="${esc(tip)}"/>`;
   }
@@ -257,7 +262,26 @@ export function hypnogram(W, h, ht = 244) {
       <circle cx="${xn.toFixed(1)}" cy="${yDot}" r="3" fill="${col("strain")}"/>
       ${txt(xn, yLabel, `${h.nadirBpm} bpm floor`, { size: 9.5, anchor: "middle", fill: "strain" })}`;
   }
-  return svg(W, ht, p, "Sleep stages across the night with cycle markers and the heart-rate floor");
+  // Scrub bands across the night -- same contract as the heart-rate chart, one
+  // band per sampled minute carrying the stage under it and the clock time.
+  // The per-segment data-tips stop being reachable the moment data-scrub is set
+  // (app.js excludes marks inside a scrubbable chart from the floating tooltip),
+  // which is the point: a 3px REM sliver at the end of a cycle was never a
+  // touch target, and those are exactly the transitions worth reading.
+  const nb = Math.max(24, Math.min(320, Math.round(iw)));
+  const bw = iw / nb;
+  let si = 0;
+  for (let i = 0; i < nb; i++) {
+    const m = (i + 0.5) * (h.span / nb);
+    while (si < h.segs.length - 1 && h.segs[si].b <= m) si++;
+    const seg = h.segs[si];
+    const name = STAGE_NAME[seg.t] || seg.t;
+    p += `<rect data-i="${i}" data-x="${X(m).toFixed(1)}" data-y="${(Y(LEVEL[seg.t]) + bar / 2).toFixed(1)}"
+      x="${(X(m) - bw / 2).toFixed(1)}" y="${padT}" width="${bw.toFixed(1)}" height="${ih.toFixed(1)}"
+      fill="transparent" data-tip="${esc(`${name} · ${clock(m)}|${dur(seg.b - seg.a)} block · ${clock(seg.a)}–${clock(seg.b)}`)}"/>`;
+  }
+  p += scrubLayer(padT, padT + ih);
+  return svg(W, ht, p, "Sleep stages across the night with cycle markers and the heart-rate floor", "time");
 }
 
 // ---------------------------------------------------------------- intraday
