@@ -5,7 +5,11 @@
 // worse than a spinner. So the shell is cached for offline launch, and every
 // piece of data goes to the network.
 
-const SHELL = "pulse-shell-v1";
+// Bumped to v2: activate deletes every cache whose name is not SHELL, so
+// renaming it is what actually evicts a stale shell. The fetch handler is
+// network-first, so this should never have mattered -- but "should never" has
+// been wrong three times on this bug, and the eviction is free.
+const SHELL = "pulse-shell-v2";
 const FILES = ["/", "/index.html", "/app.js", "/styles.css", "/manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {

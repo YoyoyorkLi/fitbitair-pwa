@@ -137,6 +137,9 @@ function bindTips(root) {
 // browser could not falsify, and both were wrong. This prints what the phone
 // actually does. Entirely inert without the query param.
 const DBG = new URLSearchParams(location.search).has("debug");
+// Bumped by hand whenever the scrubber changes. Compared against the commit
+// /api/config reports, so a stale cached bundle is visible instead of inferred.
+const BUILD = "scrub-pointer-1";
 let dbgBox = null;
 function dbg(line) {
   if (!DBG) return;
@@ -334,6 +337,16 @@ async function boot() {
       const cfg = await fetch("/api/config").then((r) => r.json());
       if (!cfg.error) {
         if (cfg.tz) tz = cfg.tz;
+        // Deliberately a second, cache-busted request rather than reading
+        // cfg.commit: /api/config sets max-age=3600 (its own header beats
+        // vercel.json's no-store), so the cached copy could report an
+        // hour-old commit -- exactly the ambiguity this is meant to remove.
+        if (DBG) {
+          fetch(`/api/config?nocache=${Date.now()}`, { cache: "no-store" })
+            .then((r) => r.json())
+            .then((c) => dbg(`BUILD ${BUILD} | server ${c.commit || "?"} | ${BUILD === "scrub-pointer-1" ? "app.js is current" : "?"}`))
+            .catch(() => dbg(`BUILD ${BUILD} | server unreachable`));
+        }
         sb = createClient(cfg.url, cfg.anonKey);
         const { data } = await sb.auth.getSession();
         if (!data.session) return show("signin");

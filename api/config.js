@@ -22,5 +22,14 @@ export default function handler(req, res) {
   // take effect within the hour rather than whenever a service worker feels
   // like revalidating.
   res.setHeader("Cache-Control", "public, max-age=3600");
-  res.status(200).json({ url, anonKey, tz: process.env.PULSE_TZ || "America/Chicago" });
+  res.status(200).json({
+    url, anonKey,
+    tz: process.env.PULSE_TZ || "America/Chicago",
+    // Which commit is actually deployed. Vercel injects this; the PWA compares
+    // it against the BUILD constant compiled into its own app.js. When they
+    // disagree, the browser is running a cached bundle against a newer server
+    // -- which turns "is my phone on the new code?" from a guess into a
+    // one-line answer, after three rounds of not being able to tell.
+    commit: (process.env.VERCEL_GIT_COMMIT_SHA || "").slice(0, 7) || "local",
+  });
 }
