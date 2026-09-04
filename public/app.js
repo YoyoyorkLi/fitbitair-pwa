@@ -184,46 +184,74 @@ function scrubAt(svgEl, clientX) {
 }
 
 function bindScrub(root) {
-  let drag = null, sawPointerMove = false;
+  let drag = null;                       // the <svg> currently being scrubbed
+  let tId = null, tX = 0, tY = 0, axis = null;
 
+  // ---- mouse / trackpad -----------------------------------------------------
   root.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch") return;          // touch is handled below
     const s = e.target.closest?.("svg[data-scrub]");
     if (!s) return;
     drag = s;
-    sawPointerMove = false;
     scrubAt(s, e.clientX);
   });
-
-  // NO setPointerCapture, and the move listener is on window rather than the
-  // chart. Capture is the textbook way to keep receiving moves once a finger
-  // wanders off the element, and on iOS it is precisely what breaks this:
-  // WebKit stops delivering pointermove for a pointer captured on an SVG
-  // element, so the readout froze on whatever the first touch landed on while
-  // the finger kept moving -- the date appeared to track because the crosshair
-  // is where you are looking, but nothing was updating at all.
-  //
-  // A window listener needs no capture, cannot be revoked mid-gesture, and
-  // still sees moves that leave the chart. Synthetic events dispatched straight
-  // at the element bypass capture semantics entirely, which is why every test
-  // of this passed on a desktop browser.
   addEventListener("pointermove", (e) => {
-    if (drag) { sawPointerMove = true; scrubAt(drag, e.clientX); return; }
-    if (e.pointerType !== "mouse") return;          // touch scrubs only while down
+    if (e.pointerType === "touch") return;
+    if (drag) { scrubAt(drag, e.clientX); return; }
     const s = e.target.closest?.("svg[data-scrub]");
     if (s) scrubAt(s, e.clientX);
   }, { passive: true });
+  for (const ev of ["pointerup", "pointercancel"]) {
+    addEventListener(ev, (e) => { if (e.pointerType !== "touch") drag = null; });
+  }
 
-  // Belt and braces for the same WebKit bug: if pointermove never arrives for
-  // this gesture, touchmove still does. Guarded on sawPointerMove so browsers
-  // that fire both do not scrub twice per frame.
-  addEventListener("touchmove", (e) => {
-    if (!drag || sawPointerMove) return;
-    const t = e.touches && e.touches[0];
-    if (t) scrubAt(drag, t.clientX);
+  // ---- touch ----------------------------------------------------------------
+  // Touch gets its own path because the browser and this code are competing for
+  // the same gesture, and the browser wins by default.
+  //
+  // The symptom was that only the heart-rate chart scrubbed. Its bands are
+  // ~1.4px wide (one per minute of the night); every other chart uses hits(),
+  // where a 14-day window makes them ~20px. iOS decides a gesture is a scroll
+  // after roughly ten pixels of travel and takes it away. Ten pixels crosses
+  // seven bands on the heart-rate chart, so it looked alive -- and zero bands
+  // on a 14-day chart, so the value never changed and read as frozen. Same
+  // broken gesture, two very different appearances.
+  //
+  // touch-action:pan-y is supposed to reserve the horizontal axis for us and
+  // demonstrably does not here, so decide the axis explicitly: once a gesture
+  // is clearly horizontal, preventDefault() claims it and the scroller lets go.
+  // A clearly vertical one releases the chart so the page scrolls normally.
+  const AXIS_SLOP = 6;                   // px before the direction is meaningful
+
+  root.addEventListener("touchstart", (e) => {
+    const s = e.target.closest?.("svg[data-scrub]");
+    if (!s) return;
+    const t = e.changedTouches[0];
+    drag = s; tId = t.identifier; axis = null;
+    tX = t.clientX; tY = t.clientY;
+    scrubAt(s, t.clientX);
   }, { passive: true });
 
-  for (const ev of ["pointerup", "pointercancel", "touchend", "touchcancel"]) {
-    addEventListener(ev, () => { drag = null; });
+  // Deliberately NOT passive: this listener has to be able to preventDefault.
+  root.addEventListener("touchmove", (e) => {
+    if (!drag) return;
+    const t = [...e.touches].find((x) => x.identifier === tId) || e.touches[0];
+    if (!t) return;
+
+    if (!axis) {
+      const dx = Math.abs(t.clientX - tX), dy = Math.abs(t.clientY - tY);
+      if (dx < AXIS_SLOP && dy < AXIS_SLOP) return;  // too early to tell
+      axis = dx > dy ? "x" : "y";
+      if (axis === "y") { drag = null; return; }     // a scroll: hands off
+    }
+    // cancelable is false once the browser has already begun scrolling; calling
+    // preventDefault then is a no-op that logs a console warning, so ask first.
+    if (e.cancelable) e.preventDefault();
+    scrubAt(drag, t.clientX);
+  }, { passive: false });
+
+  for (const ev of ["touchend", "touchcancel"]) {
+    addEventListener(ev, () => { drag = null; axis = null; });
   }
 }
 
