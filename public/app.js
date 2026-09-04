@@ -139,7 +139,7 @@ function bindTips(root) {
 const DBG = new URLSearchParams(location.search).has("debug");
 // Bumped by hand whenever the scrubber changes. Compared against the commit
 // /api/config reports, so a stale cached bundle is visible instead of inferred.
-const BUILD = "scrub-pointer-1";
+const BUILD = "scrub-pointer-2";
 let dbgBox = null;
 function dbg(line) {
   if (!DBG) return;
@@ -266,10 +266,25 @@ function bindScrub(root) {
     if (drag && axis === "x" && e.cancelable) e.preventDefault();
   }, { passive: false });
 
+  // ONLY pointer events end the gesture. Ending on touchend was the bug that
+  // survived every previous fix: the device log shows iOS firing
+  //
+  //   touchstart on <rect> -> day chart, 14 bands
+  //   touchend after 0 moves, axis=null
+  //   pointermove(touch) x55
+  //
+  // -- touchend arriving before any movement, then 55 pointermoves after it.
+  // Clearing drag there meant every subsequent pointermove fell into the
+  // mouse-only hover branch and returned, so the gesture was dead before it
+  // began. The heart-rate chart escaped because it also receives real
+  // touchmoves; the 14-band charts do not.
+  //
+  // Driving with pointer events and ending with touch events was mixing two
+  // lifecycles that do not agree on this platform. pointerup/pointercancel are
+  // the counterparts to pointerdown, and a stale drag is harmless anyway --
+  // the next pointerdown replaces it, and hover is mouse-only.
   addEventListener("pointerup", () => end("pointerup"));
   addEventListener("pointercancel", () => end("pointercancel"));
-  addEventListener("touchend", () => end("touchend"));
-  addEventListener("touchcancel", () => end("touchcancel"));
 }
 
 // Every scrubbable chart starts showing its newest sample, so the readout row
@@ -344,7 +359,7 @@ async function boot() {
         if (DBG) {
           fetch(`/api/config?nocache=${Date.now()}`, { cache: "no-store" })
             .then((r) => r.json())
-            .then((c) => dbg(`BUILD ${BUILD} | server ${c.commit || "?"} | ${BUILD === "scrub-pointer-1" ? "app.js is current" : "?"}`))
+            .then((c) => dbg(`BUILD ${BUILD} | server ${c.commit || "?"} | ${BUILD === "scrub-pointer-2" ? "app.js is current" : "?"}`))
             .catch(() => dbg(`BUILD ${BUILD} | server unreachable`));
         }
         sb = createClient(cfg.url, cfg.anonKey);
