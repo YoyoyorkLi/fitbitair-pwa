@@ -139,7 +139,7 @@ function bindTips(root) {
 const DBG = new URLSearchParams(location.search).has("debug");
 // Bumped by hand whenever the scrubber changes. Compared against the commit
 // /api/config reports, so a stale cached bundle is visible instead of inferred.
-const BUILD = "scrub-container-none";
+const BUILD = "scrub-noselect";
 let dbgBox = null;
 function dbg(line) {
   if (!DBG) return;
@@ -282,7 +282,11 @@ function bindScrub(root) {
   // lifecycles that do not agree on this platform. pointerup/pointercancel are
   // the counterparts to pointerdown, and a stale drag is harmless anyway --
   // the next pointerdown replaces it, and hover is mouse-only.
-  addEventListener("pointerup", () => end("pointerup"));
+  // Counts raw moves whether or not a drag is live, so the next log
+  // distinguishes "no events delivered" from "events delivered but ignored".
+  let rawMoves = 0;
+  addEventListener("pointermove", (e) => { if (e.pointerType !== "mouse") rawMoves++; }, { passive: true });
+  addEventListener("pointerup", () => { dbg(`raw pointermoves this gesture: ${rawMoves}`); rawMoves = 0; end("pointerup"); });
   addEventListener("pointercancel", () => end("pointercancel"));
 }
 
@@ -358,7 +362,7 @@ async function boot() {
         if (DBG) {
           fetch(`/api/config?nocache=${Date.now()}`, { cache: "no-store" })
             .then((r) => r.json())
-            .then((c) => dbg(`BUILD ${BUILD} | server ${c.commit || "?"} | ${BUILD === "scrub-container-none" ? "app.js is current" : "?"}`))
+            .then((c) => dbg(`BUILD ${BUILD} | server ${c.commit || "?"} | ${BUILD === "scrub-noselect" ? "app.js is current" : "?"}`))
             .catch(() => dbg(`BUILD ${BUILD} | server unreachable`));
         }
         sb = createClient(cfg.url, cfg.anonKey);

@@ -115,7 +115,22 @@ a{color:var(--accent)}
    place the property is reliably honoured, so the container carries it and
    the svg keeps it as a second line. */
 .chartbox.scrubbable,
-.chartbox:has(svg[data-scrub]){touch-action:none}
+.chartbox:has(svg[data-scrub]){
+  touch-action:none;
+  /* The device log showed every gesture arriving as pointerdown -> pointerup
+     with ZERO pointermove in between, on 7-, 14- and 270-band charts alike,
+     and ending in pointerup rather than pointercancel -- so Safari was not
+     stealing the gesture for scrolling, it was holding it and delivering no
+     movement. That is what a text-selection gesture looks like from JS.
+     These charts are full of <text> nodes (axis labels, values, cycle
+     markers), and a press-and-drag across text on iOS starts a selection: the
+     loupe appears and move events stop reaching the page. Taps survived
+     because a tap never moves.
+     Disabling selection and the long-press callout on the chart gives the
+     movement back. Nothing here is text anyone would want to select. */
+  -webkit-user-select:none; user-select:none;
+  -webkit-touch-callout:none;
+}
 .chartbox svg[data-scrub]{touch-action:none;cursor:crosshair}
 
 /* Where a scrubbed value lands: pinned under the card title, above the chart,
