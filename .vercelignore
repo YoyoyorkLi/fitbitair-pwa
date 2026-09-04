@@ -1,0 +1,17 @@
+# Vercel deploys this repo's ROOT -- api/ and public/. Everything listed here is
+# either a different deploy target or a local artifact, and none of it is served.
+#
+# This file only matters for CLI deploys (`vercel --prod`), which upload the
+# working directory rather than a git tree. Without it the deploy dies on
+# "File size limit exceeded (100 MB)": pulse/pulse.db is a 600MB+ SQLite cache
+# of raw heart-rate samples. Git-based deploys never hit this, because that file
+# is gitignored and git only ever sends committed content -- which is exactly
+# why it stayed invisible until the first CLI deploy.
+
+# The Google Health sync. Runs on GitHub Actions, never on Vercel: its own
+# README and .github/workflows/sync.yml own this half of the project.
+pulse/
+
+# Local tooling and generated artifacts.
+.claude/
+preview.html

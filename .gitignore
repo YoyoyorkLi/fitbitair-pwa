@@ -24,3 +24,5 @@ pulse/.env
 pulse/.env.bak.*
 pulse/.token.json
 pulse/client_secret*.json
+.vercel
+.env*
