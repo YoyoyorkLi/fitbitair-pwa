@@ -204,106 +204,69 @@ function scrubAt(svgEl, clientX) {
 }
 
 function bindScrub(root) {
-  let drag = null;                       // the <svg> currently being scrubbed
-  let tId = null, tX = 0, tY = 0, axis = null;
+  let drag = null, sx = 0, sy = 0, axis = null, moves = 0;
 
-  // ---- mouse / trackpad -----------------------------------------------------
-  root.addEventListener("pointerdown", (e) => {
-    if (e.pointerType === "touch") return;          // touch is handled below
-    const s = e.target.closest?.("svg[data-scrub]");
-    if (!s) return;
-    drag = s;
-    scrubAt(s, e.clientX);
-  });
-  addEventListener("pointermove", (e) => {
-    if (e.pointerType === "touch") return;
-    if (drag) { scrubAt(drag, e.clientX); return; }
-    const s = e.target.closest?.("svg[data-scrub]");
-    if (s) scrubAt(s, e.clientX);
-  }, { passive: true });
-  for (const ev of ["pointerup", "pointercancel"]) {
-    addEventListener(ev, (e) => { if (e.pointerType !== "touch") drag = null; });
-  }
-
-  // ---- touch ----------------------------------------------------------------
-  // Touch gets its own path because the browser and this code are competing for
-  // the same gesture, and the browser wins by default.
+  // Pointer events drive everything, touch included.
   //
-  // The symptom was that only the heart-rate chart scrubbed. Its bands are
-  // ~1.4px wide (one per minute of the night); every other chart uses hits(),
-  // where a 14-day window makes them ~20px. iOS decides a gesture is a scroll
-  // after roughly ten pixels of travel and takes it away. Ten pixels crosses
-  // seven bands on the heart-rate chart, so it looked alive -- and zero bands
-  // on a 14-day chart, so the value never changed and read as frozen. Same
-  // broken gesture, two very different appearances.
+  // The device log settled this. On the heart-rate chart a drag produced 46
+  // touchmove events and worked. On a 14-band chart the same gesture produced
+  // ZERO touchmove events -- while pointermove(touch) fired 55, 60, 70 times
+  // for those very gestures. touchmove is simply not a reliable stream here,
+  // and the axis logic that hung off it never ran at all.
   //
-  // touch-action:pan-y is supposed to reserve the horizontal axis for us and
-  // demonstrably does not here, so decide the axis explicitly: once a gesture
-  // is clearly horizontal, preventDefault() claims it and the scroller lets go.
-  // A clearly vertical one releases the chart so the page scrolls normally.
-  // A finger rolls on contact. Measured on a real iPhone, the first qualifying
-  // sample of a deliberately HORIZONTAL drag was dx=3 dy=10 -- so a symmetric
-  // "whichever is bigger after 6px" test locked the gesture to vertical on
-  // sample one and released the chart, permanently, before the drag had begun.
+  // pointermove fires for touch everywhere, so it is the one to build on. The
+  // touchmove listener below survives for exactly one job: preventDefault, to
+  // stop the page scrolling once a gesture is clearly ours. It no longer
+  // decides anything.
   //
-  // The rule is therefore asymmetric and biased toward the chart: real
-  // horizontal travel claims the gesture; only sustained vertical travel with
-  // almost no horizontal gives it back to the scroller. Between the two it
-  // stays undecided and keeps scrubbing, because an undecided gesture that
-  // scrubs is recoverable and an undecided gesture that has been released is
-  // not.
+  // The axis rule is asymmetric and biased toward the chart, because a finger
+  // rolls as it lands: a deliberately horizontal drag measured dx=3 dy=10 on
+  // its first sample, and a symmetric test threw the gesture away on that.
   const CLAIM_X = 10;                    // horizontal px that means "scrub"
-  const RELEASE_Y = 24;                  // vertical px, with little horizontal, that means "scroll"
+  const RELEASE_Y = 24;                  // vertical px, little horizontal, means "scroll"
 
-  root.addEventListener("touchstart", (e) => {
+  const begin = (svgEl, x, y) => {
+    drag = svgEl; sx = x; sy = y; axis = null; moves = 0;
+    scrubAt(svgEl, x);
+  };
+  const end = (why) => {
+    if (drag) dbg(`${why} after ${moves} moves, axis=${axis}`);
+    drag = null; axis = null;
+  };
+
+  root.addEventListener("pointerdown", (e) => {
     const s = e.target.closest?.("svg[data-scrub]");
-    dbg(`touchstart on <${e.target.tagName}> -> ${s ? s.dataset.scrub + " chart, " + s.querySelectorAll("rect[data-i]").length + " bands" : "NO SCRUB SVG"}`);
-    if (!s) return;
-    const t = e.changedTouches[0];
-    drag = s; tId = t.identifier; axis = null;
-    tX = t.clientX; tY = t.clientY;
-    scrubAt(s, t.clientX);
+    dbg(`pointerdown(${e.pointerType}) -> ${s ? s.dataset.scrub + " chart, " + s.querySelectorAll("rect[data-i]").length + " bands" : "no chart"}`);
+    if (s) begin(s, e.clientX, e.clientY);
+  });
+
+  addEventListener("pointermove", (e) => {
+    if (!drag) {
+      if (e.pointerType !== "mouse") return;         // hover is a mouse-only idea
+      const s = e.target.closest?.("svg[data-scrub]");
+      if (s) scrubAt(s, e.clientX);
+      return;
+    }
+    moves++;
+    const dx = Math.abs(e.clientX - sx), dy = Math.abs(e.clientY - sy);
+    if (!axis) {
+      if (dx >= CLAIM_X) { axis = "x"; dbg(`axis=x after ${moves} moves (dx=${dx|0} dy=${dy|0})`); }
+      else if (dy >= RELEASE_Y) { dbg(`axis=y, releasing (dx=${dx|0} dy=${dy|0})`); drag = null; axis = null; return; }
+      // undecided: scrub anyway. An undecided gesture that scrubs can still
+      // become a scroll; one that has been released can never become a scrub.
+    }
+    scrubAt(drag, e.clientX);
   }, { passive: true });
 
-  // Deliberately NOT passive: this listener has to be able to preventDefault.
-  let moves = 0;
+  // Sole purpose: stop the page scrolling once the gesture is clearly ours.
   root.addEventListener("touchmove", (e) => {
-    if (!drag) return dbg("touchmove but drag=null");
-    moves++;
-    const t = [...e.touches].find((x) => x.identifier === tId) || e.touches[0];
-    if (!t) return;
-
-    const dx = Math.abs(t.clientX - tX), dy = Math.abs(t.clientY - tY);
-    if (!axis) {
-      if (dx >= CLAIM_X) {
-        axis = "x";
-        dbg(`axis=x after ${moves} moves (dx=${dx.toFixed(0)} dy=${dy.toFixed(0)})`);
-      } else if (dy >= RELEASE_Y) {
-        axis = "y";
-        dbg(`axis=y, releasing (dx=${dx.toFixed(0)} dy=${dy.toFixed(0)})`);
-        drag = null;
-        return;                                      // a real scroll: hands off
-      }
-      // else undecided -- fall through and scrub anyway
-    }
-    // Only claim the gesture once it is definitely ours. cancelable is false
-    // after the browser has begun scrolling, and preventDefault then is a no-op
-    // that logs a warning, so ask first.
-    if (axis === "x" && e.cancelable) e.preventDefault();
-    scrubAt(drag, t.clientX);
+    if (drag && axis === "x" && e.cancelable) e.preventDefault();
   }, { passive: false });
 
-  for (const ev of ["touchend", "touchcancel"]) {
-    addEventListener(ev, (e) => { dbg(`${e.type} after ${moves} moves, axis=${axis}`); moves = 0; drag = null; axis = null; });
-  }
-  // Are pointer events firing for touch at all? The touch path ignores them,
-  // but knowing whether they arrive distinguishes "gesture stolen" from
-  // "listener never ran".
-  addEventListener("pointerdown", (e) => { if (e.pointerType === "touch") dbg("pointerdown(touch) seen"); }, { passive: true });
-  let pmoves = 0;
-  addEventListener("pointermove", (e) => {
-    if (e.pointerType === "touch" && ++pmoves % 5 === 0) dbg(`pointermove(touch) x${pmoves}`);
-  }, { passive: true });
+  addEventListener("pointerup", () => end("pointerup"));
+  addEventListener("pointercancel", () => end("pointercancel"));
+  addEventListener("touchend", () => end("touchend"));
+  addEventListener("touchcancel", () => end("touchcancel"));
 }
 
 // Every scrubbable chart starts showing its newest sample, so the readout row
