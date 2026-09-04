@@ -91,8 +91,21 @@ a{color:var(--accent)}
    viewBox shrinking type to ~4px on a phone. Nothing here scrolls sideways now,
    so there is no edge-fade to signal either. */
 .chartbox svg{display:block;width:100%;height:auto}
-/* Horizontal drag belongs to the scrubber; vertical still scrolls the page. */
-.chartbox svg[data-scrub]{touch-action:pan-y;cursor:crosshair}
+/* touch-action:none, and it has to be none.
+   pan-y looks like the right answer -- "horizontal is mine, vertical is the
+   page's" -- and it is the documented cause of this bug. On iOS, an element
+   with pan-y inside a vertically scrolling page receives a pointercancel
+   during a horizontal pan unless the gesture is almost perfectly straight. A
+   finger rolls as it lands (measured on device: dx=3 dy=10 on the first
+   sample), Safari calls that ambiguous, cancels the pointer, and the drag is
+   over before it starts. No amount of JS recovers a cancelled pointer.
+
+   The cost is real: you can no longer scroll the page by starting a drag on a
+   chart. Charts are ~230px inside cards with padding, titles, readouts and
+   gaps between them, so there is plenty of page left to scroll from -- and a
+   scrubber that works beats a scroll target that duplicates the rest of the
+   page. */
+.chartbox svg[data-scrub]{touch-action:none;cursor:crosshair}
 
 /* Where a scrubbed value lands: pinned under the card title, above the chart,
    so a thumb on the chart is never on top of the number it just asked for.

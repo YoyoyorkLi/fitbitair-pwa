@@ -139,7 +139,7 @@ function bindTips(root) {
 const DBG = new URLSearchParams(location.search).has("debug");
 // Bumped by hand whenever the scrubber changes. Compared against the commit
 // /api/config reports, so a stale cached bundle is visible instead of inferred.
-const BUILD = "scrub-pointer-2";
+const BUILD = "scrub-touchaction-none";
 let dbgBox = null;
 function dbg(line) {
   if (!DBG) return;
@@ -261,10 +261,9 @@ function bindScrub(root) {
     scrubAt(drag, e.clientX);
   }, { passive: true });
 
-  // Sole purpose: stop the page scrolling once the gesture is clearly ours.
-  root.addEventListener("touchmove", (e) => {
-    if (drag && axis === "x" && e.cancelable) e.preventDefault();
-  }, { passive: false });
+  // No touchmove listener. touch-action:none on the chart already stops the
+  // page scrolling, so preventDefault here would be belt over belt -- and a
+  // non-passive touchmove listener on a scrolling page costs something.
 
   // ONLY pointer events end the gesture. Ending on touchend was the bug that
   // survived every previous fix: the device log shows iOS firing
@@ -359,7 +358,7 @@ async function boot() {
         if (DBG) {
           fetch(`/api/config?nocache=${Date.now()}`, { cache: "no-store" })
             .then((r) => r.json())
-            .then((c) => dbg(`BUILD ${BUILD} | server ${c.commit || "?"} | ${BUILD === "scrub-pointer-2" ? "app.js is current" : "?"}`))
+            .then((c) => dbg(`BUILD ${BUILD} | server ${c.commit || "?"} | ${BUILD === "scrub-touchaction-none" ? "app.js is current" : "?"}`))
             .catch(() => dbg(`BUILD ${BUILD} | server unreachable`));
         }
         sb = createClient(cfg.url, cfg.anonKey);
