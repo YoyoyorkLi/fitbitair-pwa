@@ -114,10 +114,20 @@ export default async function handler(req, res) {
     // workflow logs for a token that simply aged out.
     const detail = (await r.text()).slice(0, 300);
     console.error(`sync: dispatch failed ${r.status}: ${detail}`);
-    if (r.status === 401) return json(res, 502, { error: "GitHub token rejected — expired or revoked" });
-    if (r.status === 403) return json(res, 502, { error: "GitHub token lacks Actions: write on this repo" });
-    if (r.status === 404) return json(res, 502, { error: `workflow ${WORKFLOW} not found on ${slug}` });
-    return json(res, 502, { error: `GitHub said ${r.status}` });
+    // Pass GitHub's own message through. Guessing at the cause was actively
+    // unhelpful: a 403 here can mean the permission is missing, OR the repo
+    // was never selected on the token, OR a fine-grained token is awaiting
+    // owner approval -- three different fixes behind one sentence. Only a
+    // verified caller reaches this line, and GitHub's errors never echo the
+    // credential, so the detail is safe to return.
+    let why = "";
+    try { why = JSON.parse(detail).message || ""; } catch { why = ""; }
+    const hint =
+      r.status === 401 ? "GitHub rejected the token — expired, revoked, or mistyped"
+      : r.status === 403 ? "GitHub refused: check the token has Actions: Read and write AND lists this repo"
+      : r.status === 404 ? `Not found: ${slug} / ${WORKFLOW} — also what GitHub returns when the token cannot see the repo at all`
+      : `GitHub said ${r.status}`;
+    return json(res, 502, { error: why ? `${hint} — GitHub: ${why}` : hint, status: r.status });
   } catch (err) {
     console.error("sync: dispatch threw:", err.message || err);
     return json(res, 502, { error: "could not reach GitHub" });
