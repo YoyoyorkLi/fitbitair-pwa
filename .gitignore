@@ -25,4 +25,10 @@ pulse/.env.bak.*
 pulse/.token.json
 pulse/client_secret*.json
 .vercel
+
+# Added by the Vercel CLI. Deliberately broad -- any stray .env variant is
+# ignored by default -- with one carve-out: .env.example carries no secrets,
+# is the file README and WORKFLOW.md tell you to copy, and .env* would have
+# quietly dropped it the first time anyone deleted and re-added it.
 .env*
+!.env.example
