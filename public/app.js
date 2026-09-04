@@ -241,7 +241,19 @@ function bindScrub(root) {
   // demonstrably does not here, so decide the axis explicitly: once a gesture
   // is clearly horizontal, preventDefault() claims it and the scroller lets go.
   // A clearly vertical one releases the chart so the page scrolls normally.
-  const AXIS_SLOP = 6;                   // px before the direction is meaningful
+  // A finger rolls on contact. Measured on a real iPhone, the first qualifying
+  // sample of a deliberately HORIZONTAL drag was dx=3 dy=10 -- so a symmetric
+  // "whichever is bigger after 6px" test locked the gesture to vertical on
+  // sample one and released the chart, permanently, before the drag had begun.
+  //
+  // The rule is therefore asymmetric and biased toward the chart: real
+  // horizontal travel claims the gesture; only sustained vertical travel with
+  // almost no horizontal gives it back to the scroller. Between the two it
+  // stays undecided and keeps scrubbing, because an undecided gesture that
+  // scrubs is recoverable and an undecided gesture that has been released is
+  // not.
+  const CLAIM_X = 10;                    // horizontal px that means "scrub"
+  const RELEASE_Y = 24;                  // vertical px, with little horizontal, that means "scroll"
 
   root.addEventListener("touchstart", (e) => {
     const s = e.target.closest?.("svg[data-scrub]");
@@ -261,16 +273,23 @@ function bindScrub(root) {
     const t = [...e.touches].find((x) => x.identifier === tId) || e.touches[0];
     if (!t) return;
 
+    const dx = Math.abs(t.clientX - tX), dy = Math.abs(t.clientY - tY);
     if (!axis) {
-      const dx = Math.abs(t.clientX - tX), dy = Math.abs(t.clientY - tY);
-      if (dx < AXIS_SLOP && dy < AXIS_SLOP) return;  // too early to tell
-      axis = dx > dy ? "x" : "y";
-      dbg(`axis=${axis} after ${moves} moves (dx=${dx.toFixed(0)} dy=${dy.toFixed(0)}) cancelable=${e.cancelable}`);
-      if (axis === "y") { drag = null; return; }     // a scroll: hands off
+      if (dx >= CLAIM_X) {
+        axis = "x";
+        dbg(`axis=x after ${moves} moves (dx=${dx.toFixed(0)} dy=${dy.toFixed(0)})`);
+      } else if (dy >= RELEASE_Y) {
+        axis = "y";
+        dbg(`axis=y, releasing (dx=${dx.toFixed(0)} dy=${dy.toFixed(0)})`);
+        drag = null;
+        return;                                      // a real scroll: hands off
+      }
+      // else undecided -- fall through and scrub anyway
     }
-    // cancelable is false once the browser has already begun scrolling; calling
-    // preventDefault then is a no-op that logs a console warning, so ask first.
-    if (e.cancelable) e.preventDefault();
+    // Only claim the gesture once it is definitely ours. cancelable is false
+    // after the browser has begun scrolling, and preventDefault then is a no-op
+    // that logs a warning, so ask first.
+    if (axis === "x" && e.cancelable) e.preventDefault();
     scrubAt(drag, t.clientX);
   }, { passive: false });
 
