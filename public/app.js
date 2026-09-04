@@ -139,7 +139,7 @@ function bindTips(root) {
 const DBG = new URLSearchParams(location.search).has("debug");
 // Bumped by hand whenever the scrubber changes. Compared against the commit
 // /api/config reports, so a stale cached bundle is visible instead of inferred.
-const BUILD = "scrub-noselect";
+const BUILD = "scrub-bothstreams";
 let dbgBox = null;
 function dbg(line) {
   if (!DBG) return;
@@ -207,87 +207,81 @@ function scrubAt(svgEl, clientX) {
 }
 
 function bindScrub(root) {
-  let drag = null, sx = 0, sy = 0, axis = null, moves = 0;
+  let drag = null, sx = 0, sy = 0, axis = null;
+  let nPointer = 0, nTouch = 0;          // per-gesture, reset on every start
 
-  // Pointer events drive everything, touch included.
+  // Consume BOTH event streams instead of betting on one.
   //
-  // The device log settled this. On the heart-rate chart a drag produced 46
-  // touchmove events and worked. On a 14-band chart the same gesture produced
-  // ZERO touchmove events -- while pointermove(touch) fired 55, 60, 70 times
-  // for those very gestures. touchmove is simply not a reliable stream here,
-  // and the axis logic that hung off it never ran at all.
-  //
-  // pointermove fires for touch everywhere, so it is the one to build on. The
-  // touchmove listener below survives for exactly one job: preventDefault, to
-  // stop the page scrolling once a gesture is clearly ours. It no longer
-  // decides anything.
-  //
-  // The axis rule is asymmetric and biased toward the chart, because a finger
-  // rolls as it lands: a deliberately horizontal drag measured dx=3 dy=10 on
-  // its first sample, and a symmetric test threw the gesture away on that.
-  const CLAIM_X = 10;                    // horizontal px that means "scrub"
-  const RELEASE_Y = 24;                  // vertical px, little horizontal, means "scroll"
+  // The device has now shown pointermove and touchmove each failing to arrive
+  // on different charts -- the heart-rate chart got 46 touchmoves and no
+  // usable pointermoves, the 14-band charts got neither. Rather than keep
+  // guessing which stream iOS will honour for a given element, take whichever
+  // shows up; scrubAt is idempotent, so being driven twice for one movement
+  // costs a redundant index lookup and nothing else.
+  const CLAIM_X = 10;
+  const RELEASE_Y = 24;
 
   const begin = (svgEl, x, y) => {
-    drag = svgEl; sx = x; sy = y; axis = null; moves = 0;
-    scrubAt(svgEl, x);
+    drag = svgEl; sx = x; sy = y; axis = null;
+    nPointer = 0; nTouch = 0;            // reset HERE, not at the end -- the
+    scrubAt(svgEl, x);                   // previous version counted the moves
+  };                                     // of the gesture before this one
+
+  const move = (x, y) => {
+    if (!drag) return;
+    const dx = Math.abs(x - sx), dy = Math.abs(y - sy);
+    if (!axis) {
+      if (dx >= CLAIM_X) { axis = "x"; dbg(`axis=x (dx=${dx | 0} dy=${dy | 0})`); }
+      else if (dy >= RELEASE_Y) { dbg(`axis=y, releasing (dx=${dx | 0} dy=${dy | 0})`); drag = null; return; }
+    }
+    scrubAt(drag, x);
   };
+
   const end = (why) => {
-    if (drag) dbg(`${why} after ${moves} moves, axis=${axis}`);
+    if (drag) dbg(`${why}: pointermoves=${nPointer} touchmoves=${nTouch} axis=${axis}`);
     drag = null; axis = null;
   };
 
   root.addEventListener("pointerdown", (e) => {
     const s = e.target.closest?.("svg[data-scrub]");
-    dbg(`pointerdown(${e.pointerType}) -> ${s ? s.dataset.scrub + " chart, " + s.querySelectorAll("rect[data-i]").length + " bands" : "no chart"}`);
+    dbg(`pointerdown(${e.pointerType}) -> ${s ? s.dataset.scrub + ", " + s.querySelectorAll("rect[data-i]").length + " bands" : "no chart"}`);
     if (s) begin(s, e.clientX, e.clientY);
   });
 
   addEventListener("pointermove", (e) => {
-    if (!drag) {
-      if (e.pointerType !== "mouse") return;         // hover is a mouse-only idea
-      const s = e.target.closest?.("svg[data-scrub]");
-      if (s) scrubAt(s, e.clientX);
-      return;
-    }
-    moves++;
-    const dx = Math.abs(e.clientX - sx), dy = Math.abs(e.clientY - sy);
-    if (!axis) {
-      if (dx >= CLAIM_X) { axis = "x"; dbg(`axis=x after ${moves} moves (dx=${dx|0} dy=${dy|0})`); }
-      else if (dy >= RELEASE_Y) { dbg(`axis=y, releasing (dx=${dx|0} dy=${dy|0})`); drag = null; axis = null; return; }
-      // undecided: scrub anyway. An undecided gesture that scrubs can still
-      // become a scroll; one that has been released can never become a scrub.
-    }
-    scrubAt(drag, e.clientX);
+    if (drag) { nPointer++; move(e.clientX, e.clientY); return; }
+    if (e.pointerType !== "mouse") return;
+    const s = e.target.closest?.("svg[data-scrub]");
+    if (s) scrubAt(s, e.clientX);         // desktop hover
   }, { passive: true });
 
-  // No touchmove listener. touch-action:none on the chart already stops the
-  // page scrolling, so preventDefault here would be belt over belt -- and a
-  // non-passive touchmove listener on a scrolling page costs something.
+  // Non-passive so it can preventDefault: on iOS that is what stops a
+  // press-and-drag from becoming a scroll or a selection once the gesture is
+  // ours. Also a second chance at the movement when pointermove stays silent.
+  root.addEventListener("touchmove", (e) => {
+    if (!drag) return;
+    const t = e.touches[0];
+    if (!t) return;
+    nTouch++;
+    if (e.cancelable) e.preventDefault();
+    move(t.clientX, t.clientY);
+  }, { passive: false });
 
-  // ONLY pointer events end the gesture. Ending on touchend was the bug that
-  // survived every previous fix: the device log shows iOS firing
-  //
-  //   touchstart on <rect> -> day chart, 14 bands
-  //   touchend after 0 moves, axis=null
-  //   pointermove(touch) x55
-  //
-  // -- touchend arriving before any movement, then 55 pointermoves after it.
-  // Clearing drag there meant every subsequent pointermove fell into the
-  // mouse-only hover branch and returned, so the gesture was dead before it
-  // began. The heart-rate chart escaped because it also receives real
-  // touchmoves; the 14-band charts do not.
-  //
-  // Driving with pointer events and ending with touch events was mixing two
-  // lifecycles that do not agree on this platform. pointerup/pointercancel are
-  // the counterparts to pointerdown, and a stale drag is harmless anyway --
-  // the next pointerdown replaces it, and hover is mouse-only.
-  // Counts raw moves whether or not a drag is live, so the next log
-  // distinguishes "no events delivered" from "events delivered but ignored".
-  let rawMoves = 0;
-  addEventListener("pointermove", (e) => { if (e.pointerType !== "mouse") rawMoves++; }, { passive: true });
-  addEventListener("pointerup", () => { dbg(`raw pointermoves this gesture: ${rawMoves}`); rawMoves = 0; end("pointerup"); });
+  // A touchstart fallback for the same reason: if pointerdown is ever the
+  // stream that goes missing, the gesture still starts.
+  root.addEventListener("touchstart", (e) => {
+    if (drag) return;                     // pointerdown already handled it
+    const s = e.target.closest?.("svg[data-scrub]");
+    if (!s) return;
+    const t = e.changedTouches[0];
+    dbg(`touchstart (no pointerdown) -> ${s.dataset.scrub}`);
+    begin(s, t.clientX, t.clientY);
+  }, { passive: true });
+
+  addEventListener("pointerup", () => end("pointerup"));
   addEventListener("pointercancel", () => end("pointercancel"));
+  addEventListener("touchend", () => end("touchend"));
+  addEventListener("touchcancel", () => end("touchcancel"));
 }
 
 // Every scrubbable chart starts showing its newest sample, so the readout row
@@ -362,7 +356,7 @@ async function boot() {
         if (DBG) {
           fetch(`/api/config?nocache=${Date.now()}`, { cache: "no-store" })
             .then((r) => r.json())
-            .then((c) => dbg(`BUILD ${BUILD} | server ${c.commit || "?"} | ${BUILD === "scrub-noselect" ? "app.js is current" : "?"}`))
+            .then((c) => dbg(`BUILD ${BUILD} | server ${c.commit || "?"} | ${BUILD === "scrub-bothstreams" ? "app.js is current" : "?"}`))
             .catch(() => dbg(`BUILD ${BUILD} | server unreachable`));
         }
         sb = createClient(cfg.url, cfg.anonKey);
