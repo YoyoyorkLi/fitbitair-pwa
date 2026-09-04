@@ -35,6 +35,10 @@ a{color:var(--accent)}
   padding:6px 8px;min-width:104px;text-align:center;font-variant-numeric:tabular-nums}
 /* Only looks tappable once tapping it would do something. */
 .daynav.stepped .stamp{color:var(--accent);text-decoration:underline;text-underline-offset:3px}
+/* Two missed hourly runs, or a run that reported failure. Amber rather than
+   red: stale data is worth a look, not an alarm, and the tap path keeps
+   working regardless of whether the sync does. */
+.daynav.stale .stamp{color:var(--awake)}
 
 .tabs{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}
 .tab{background:var(--panel);border:1px solid var(--grid);color:var(--muted);border-radius:999px;
@@ -133,7 +137,13 @@ h1{font-size:22px;font-weight:600;letter-spacing:-.01em;margin:0}
   .kpi svg{width:100%;max-width:120px}
   .stats{grid-template-columns:repeat(2,1fr)}
   .brand{font-size:20px}
-  .stamp{min-width:92px;padding:6px 4px}
+  /* "Sat, Aug 29 · synced 12 min ago" will not share a 320px row with the
+     brand and two arrows, so the selector takes the whole second line. Side
+     effect worth having: the arrows end up at the screen edges, which is
+     where a thumb already is. */
+  .top{flex-wrap:wrap;gap:6px}
+  .daynav{width:100%;justify-content:space-between}
+  .stamp{flex:1;min-width:0;padding:6px 4px}
   /* Five zone tiles on one row is 55px each at 320px wide; the numbers survive
      that, the uppercase labels do not. */
   .card .stats[style]{gap:6px}

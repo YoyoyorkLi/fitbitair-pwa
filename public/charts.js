@@ -36,6 +36,28 @@ export const hm = (m) => `${Math.floor(m / 60)}h ${String(Math.round(m % 60)).pa
 export const ok = (v) => typeof v === "number" && !Number.isNaN(v);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+// ------------------------------------------------------------------- clock
+// 12-hour throughout, matching localClock() in lib/night.js -- the tap
+// notification already said "Drink 3 · 11:42p", so the dashboard reading
+// "23:42" was the odd one out, not the other way round.
+//
+// These format for DISPLAY only. Every clock value in flight stays "HH:MM"
+// 24-hour, because that is what mins() parses and what app.js writes when it
+// formats drink timestamps; converting at the source would mean parsing "a"/"p"
+// back out again on the next hop.
+const ampm = (h) => (h < 12 ? "a" : "p");
+const h12 = (h) => (h % 12 === 0 ? 12 : h % 12);
+const wrap = (t) => ((Math.round(t) % 1440) + 1440) % 1440;
+/** minute-of-day (may run past midnight) -> "11:42p" */
+const clock12 = (t) => {
+  const m = wrap(t), h = Math.floor(m / 60);
+  return `${h12(h)}:${String(m % 60).padStart(2, "0")}${ampm(h)}`;
+};
+/** minute-of-day -> "11p" -- hour ticks have no room for the minutes */
+const tick12 = (t) => { const h = Math.floor(wrap(t) / 60); return `${h12(h)}${ampm(h)}`; };
+/** "23:42" -> "11:42p" */
+const t12 = (s) => clock12(mins(s));
+
 /** A phone in portrait. Drives gutter widths and tick density, nothing else. */
 export const narrow = (W) => W < 420;
 /** Left gutter. Y labels are the only thing in it, and they are shorter on a phone. */
@@ -178,7 +200,7 @@ export function hypnogram(W, h, ht = 244) {
   const X = (m) => pl + (m / h.span) * iw;
   const Y = (lvl) => padT + lvl * row + (row - bar) / 2;
   const startMin = (() => { const [a, b] = h.start.split(":").map(Number); return a * 60 + b; })();
-  const clock = (m) => { const t = (startMin + m) % 1440; return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; };
+  const clock = (m) => clock12(startMin + m);
 
   const COL = { AWAKE: col("awake"), REM: col("rem"), LIGHT: col("light"), DEEP: col("deep") };
   let p = "";
@@ -219,7 +241,7 @@ export function hypnogram(W, h, ht = 244) {
   const hourStep = Math.max(1, Math.ceil(h.span / 60 / Math.max(2, Math.floor(W / 52))));
   for (let m = 60 - (startMin % 60), k = 0; m < h.span; m += 60, k++) {
     if (k % hourStep) continue;
-    p += txt(X(m), ht - 30, clock(m).slice(0, 2), { size: 9, anchor: "middle" });
+    p += txt(X(m), ht - 30, tick12(startMin + m), { size: 9, anchor: "middle" });
   }
 
   // The HR floor for the night: how low it went, and how long it took to get
@@ -274,41 +296,29 @@ function bucket(pts, size = BUCKET_MIN) {
   return out;
 }
 
-// Trim the dead evening off the front. push.py's _curve() pads sleep_start by
-// six hours, so a typical stored night is ~16h of which the first six are a
-// flat daytime line nobody reads — and stretching that across a phone squeezes
-// the part that matters (the descent, the floor, where the drinks landed) into
-// the right third. Start the window where the story does: two hours before
-// sleep, or at the first drink when that came earlier.
-function clipCurve(pts, sleepStart, drinkTimes) {
-  if (pts.length < 12) return pts;
-  const t0 = mins(pts[0][0]);
-  const t = unroll(pts.map((p) => p[0]), t0);
-  let lo = t0;
-  if (sleepStart) lo = Math.max(lo, unroll([sleepStart], t0)[0] - 120);
-  for (const d of drinkTimes || []) lo = Math.min(lo, unroll([d], t0)[0] - 20);
-  const kept = pts.filter((_, i) => t[i] >= lo);
-  // Never trim down to something unreadable: a night with no stages recorded
-  // has no sleepStart to anchor on, and a bad drink timestamp could push lo
-  // past the end. Either way, the untrimmed curve beats an empty one.
-  return kept.length >= 12 ? kept : pts;
-}
-
 /**
- * The overnight heart-rate curve, with Karvonen zone bands and drink markers.
- * Takes an options bag rather than (D, t) because it is now drawn for whichever
- * night the day stepper is on, not only for the newest row.
+ * One civil day of heart rate, with Karvonen zone bands and drink markers.
+ *
+ * push.py stores 00:00-24:00 local, so there is no midnight wrap inside a
+ * curve any more and every "HH:MM" here is simply a minute of this day. The
+ * chart still fits the extent of the data it actually has rather than padding
+ * out to a full 24 hours -- a day in progress ends at the last synced sample,
+ * and reserving eight blank hours for the evening you have not lived yet would
+ * squeeze the part you opened the app to look at.
+ *
+ * Takes an options bag rather than (D, t) because it is drawn for whichever
+ * day the stepper is on, not only for the newest row.
  */
-export function hrIntraday(W, { curve, drinks = [], sleepStart = null, hrmax, rhr }) {
+export function hrIntraday(W, { curve, drinks = [], hrmax, rhr }) {
   const h = 232, x0 = padL(W), x1 = W - padR(W), y0 = 36, y1 = 186, yAxis = 208;
   // A night's row has no curve until that sleep session has ended and synced --
   // push.py only computes hr_curve once sleep_start/sleep_end exist. That is
   // the normal state on every first login of the day, not an error.
   if (!curve?.length) {
-    return svg(W, 92, txt(W / 2, 50, "no heart-rate curve stored for this night", { anchor: "middle" }),
-      "No heart rate curve for this night");
+    return svg(W, 92, txt(W / 2, 50, "no heart-rate curve stored for this day", { anchor: "middle" }),
+      "No heart rate curve for this day");
   }
-  const pts = bucket(clipCurve(curve, sleepStart, drinks));
+  const pts = bucket(curve);
   const b = pts.map((p) => p[1]), lo = Math.min(...b) - 8, hi = Math.max(...b) + 8;
   const t = unroll(pts.map((p) => p[0]), mins(pts[0][0]));
   const span = t[t.length - 1] - t[0] || 1;
@@ -330,23 +340,33 @@ export function hrIntraday(W, { curve, drinks = [], sleepStart = null, hrmax, rh
   p += `<polyline points="${pts.map((q, i) => `${X(t[i]).toFixed(1)},${Y(q[1]).toFixed(1)}`).join(" ")}"
     fill="none" stroke="${col("strain")}" stroke-width="1.5" stroke-linejoin="round"/>`;
 
-  // Drink badges, staggered across two rows when they crowd. Rounds land 40-50
-  // minutes apart, which on a 320px phone spanning a whole night is ~14px --
-  // less than one badge diameter, so a single row merged five numbered dots
-  // into an unreadable amber blob. Alternating rows doubles the effective
-  // spacing without shrinking the target you have to tap.
+  // Drink markers are selected by WHERE THEY FALL, not by which drinking night
+  // they belong to. A session runs 9pm to 1am and a civil day cuts it at
+  // midnight, so a night key can no longer decide what belongs on this chart:
+  // the 1am drinks are the next day's markers on the next day's curve, and the
+  // stepper walks between the two halves. Anything outside the drawn window is
+  // not this day's business.
+  //
+  // Staggered across two rows when they crowd. Rounds land 40-50 minutes apart,
+  // which on a 320px phone spanning a whole day is ~10px -- less than one badge
+  // diameter, so a single row merged the numbered dots into an amber blob.
+  // Alternating rows doubles the effective spacing without shrinking the target.
   const R = 6.5, ROWS = [y0 - 12, y0 - 27];
+  const tLo = t[0], tHi = t[t.length - 1];
   let lastX = -1e9, row = 0;
-  unroll(drinks, t[0]).forEach((v, i) => {
-    if (v > t[t.length - 1] + 30) return;
-    const x = X(v);
-    row = x - lastX < R * 2 + 2 ? 1 - row : 0;
-    lastX = x;
-    const cy = ROWS[row];
-    p += `<line x1="${x.toFixed(1)}" y1="${(cy + R).toFixed(1)}" x2="${x.toFixed(1)}" y2="${y1}" stroke="${col("drink")}" stroke-width="1.25" opacity=".5"/>
-      <circle cx="${x.toFixed(1)}" cy="${cy}" r="${R}" fill="${col("drink")}" data-tip="${esc(`Drink ${i + 1}|${drinks[i]}`)}"/>
-      ${txt(x, cy + 3.2, i + 1, { size: 8.5, anchor: "middle", fill: "bg", weight: 700 })}`;
-  });
+  drinks
+    .map((s) => ({ at: s, v: mins(s) }))
+    .filter((d) => d.v >= tLo - 3 && d.v <= tHi + 3)
+    .sort((a, b2) => a.v - b2.v)
+    .forEach((d, i) => {
+      const x = X(Math.min(Math.max(d.v, tLo), tHi));
+      row = x - lastX < R * 2 + 2 ? 1 - row : 0;
+      lastX = x;
+      const cy = ROWS[row];
+      p += `<line x1="${x.toFixed(1)}" y1="${(cy + R).toFixed(1)}" x2="${x.toFixed(1)}" y2="${y1}" stroke="${col("drink")}" stroke-width="1.25" opacity=".5"/>
+        <circle cx="${x.toFixed(1)}" cy="${cy}" r="${R}" fill="${col("drink")}" data-tip="${esc(`Drink ${i + 1}|${t12(d.at)}`)}"/>
+        ${txt(x, cy + 3.2, i + 1, { size: 8.5, anchor: "middle", fill: "bg", weight: 700 })}`;
+    });
 
   // Hit bands are on the same time scale as everything else, so they stay
   // aligned across a gap; `data-x` hands the scrubber the centre directly.
@@ -354,7 +374,7 @@ export function hrIntraday(W, { curve, drinks = [], sleepStart = null, hrmax, rh
     const w = span / Math.max(1, pts.length - 1) / span * (x1 - x0);
     return `<rect data-i="${i}" data-x="${X(t[i]).toFixed(1)}" data-y="${Y(q[1]).toFixed(1)}"
       x="${(X(t[i]) - w / 2).toFixed(1)}" y="${y0}" width="${Math.max(w, 1).toFixed(1)}" height="${y1 - y0}"
-      fill="transparent" data-tip="${esc(`${q[1]} bpm|${q[0]}`)}"/>`;
+      fill="transparent" data-tip="${esc(`${q[1]} bpm|${t12(q[0])}`)}"/>`;
   }).join("");
 
   p += [lo, (lo + hi) / 2, hi].map((v) => txt(x0 - 7, Y(v) + 4, Math.round(v))).join("");
@@ -365,7 +385,7 @@ export function hrIntraday(W, { curve, drinks = [], sleepStart = null, hrmax, rh
   const hourStep = Math.max(1, Math.ceil(span / 60 / Math.max(2, Math.floor(W / 46))));
   for (let m = Math.ceil(t[0] / 60) * 60, k = 0; m <= t[t.length - 1]; m += 60, k++) {
     if (k % hourStep) continue;
-    p += txt(X(m), yAxis, hhmm(m).slice(0, 2), { size: 9.5, anchor: "middle" });
+    p += txt(X(m), yAxis, tick12(m), { size: 9.5, anchor: "middle" });
   }
   p += scrubLayer(y0, y1);
   return svg(W, h, p, "Heart rate across the night with zone bands and drink markers", true);

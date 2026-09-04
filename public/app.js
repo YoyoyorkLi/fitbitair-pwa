@@ -328,19 +328,58 @@ async function loadLive() {
   // One query for every drink in the window rather than one per night visited.
   // A heavy night is ~8 rows, so 45 nights is a couple of hundred at worst --
   // cheaper in one round trip than in a fetch each time you press ‹.
+  // Grouped by the CIVIL DAY each drink happened on, not by its drinking-night
+  // key. hr_curve is now one midnight-to-midnight day, so a session that runs
+  // 9pm to 1am has its markers split across two consecutive charts -- which is
+  // what the day stepper is for. Night keys still drive the dose-response
+  // count; they just no longer decide what gets drawn on a day's curve.
+  //
+  // One day earlier than the first row: a drink at 1am on dates[0] carries the
+  // night key of the day before, so a gte on dates[0] would miss it.
   if (D.drinks.some(Boolean)) {
+    const from = new Date(`${D.dates[0]}T12:00:00Z`);
+    from.setUTCDate(from.getUTCDate() - 1);
     const { data: rows } = await sb
-      .from("drinks").select("night,logged_at").gte("night", D.dates[0]).order("logged_at");
-    const byNight = {};
+      .from("drinks").select("night,logged_at")
+      .gte("night", from.toISOString().slice(0, 10)).order("logged_at");
+    const byDay = {};
     for (const r of rows || []) {
-      (byNight[r.night] ||= []).push(new Date(r.logged_at).toLocaleTimeString("en-GB", {
+      const at = new Date(r.logged_at);
+      const day = at.toLocaleDateString("en-CA", { timeZone: tz });   // YYYY-MM-DD
+      (byDay[day] ||= []).push(at.toLocaleTimeString("en-GB", {
         hour: "2-digit", minute: "2-digit", timeZone: tz,
       }));
     }
-    D.drinkTimes = D.dates.map((d) => byNight[d] || []);
+    D.drinkTimes = D.dates.map((d) => byDay[d] || []);
   }
+
+  // The dead man's check the schema was built around and nothing ever read.
+  // push() writes this on every run, success or failure; Supabase sleeps a
+  // project after 7 days idle and GitHub disables a cron workflow after ~60,
+  // and in both cases the dashboard keeps rendering yesterday's numbers with
+  // no other symptom. A wrapped failure on purpose: a missing sync_state row
+  // is a stale timestamp, not a reason to show no dashboard.
+  try {
+    const { data: s } = await sb
+      .from("sync_state").select("last_sync_at,last_ok,message").eq("id", 1).maybeSingle();
+    if (s?.last_sync_at) D.sync = { at: s.last_sync_at, ok: s.last_ok !== false };
+  } catch { /* keep the dashboard */ }
   return D;
 }
+
+// "12 min ago". Coarsens as it gets older -- past a couple of hours the exact
+// minute stops being the point and "3h ago" is the whole message.
+function ago(iso) {
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (!Number.isFinite(m)) return "";
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
+}
+// The sync runs hourly, so 45 minutes would cry wolf every single hour; two
+// missed runs is the first thing actually worth looking at.
+const STALE_MIN = 100;
 
 // stages are stored as minute offsets from sleep_start; the hypnogram wants a
 // wall-clock start and a span.
@@ -423,16 +462,37 @@ function setDay(i) {
   renderDay();
 }
 
+// The stamp doubles as the freshness indicator, which is why it replaces
+// "· latest" rather than sitting beside it: on the newest night "latest" was
+// only ever restating the disabled › button, and the question you actually
+// have looking at today's numbers is how old they are. Google's own pipeline
+// (watch -> phone -> their servers) lags by minutes to tens of minutes on top
+// of whatever this shows, so treat it as a floor on the delay, not the total.
 function updateDayNav(D, i) {
   const latest = i === D.dates.length - 1;
   const d = new Date(D.dates[i] + "T12:00:00");   // noon: no zone can roll it
   const label = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-  $("stamp").textContent = latest ? `${label} · latest` : label;
+  const s = D.sync;
+  const mins = s ? (Date.now() - new Date(s.at).getTime()) / 60000 : NaN;
+  const failed = !!s && !s.ok;
+  const stale = !!s && (failed || !(mins < STALE_MIN));
+
+  let suffix = "";
+  if (latest) suffix = s ? (failed ? "sync failed" : `synced ${ago(s.at)}`) : "latest";
+
+  $("stamp").textContent = suffix ? `${label} · ${suffix}` : label;
   $("stamp").title = latest ? "" : "Back to the latest night";
   $("day-prev").disabled = i <= 0;
   $("day-next").disabled = latest;
   $("daynav").classList.toggle("stepped", !latest);
+  $("daynav").classList.toggle("stale", latest && stale);
 }
+
+// "12 min ago" is wrong sixty seconds later, and this app gets left open on a
+// bedside table. Cheap enough to just re-stamp; only the newest night shows it.
+setInterval(() => {
+  if (DATA && !$("dash").hidden && dayIdx === DATA.dates.length - 1) updateDayNav(DATA, dayIdx);
+}, 60_000);
 
 function renderDay() {
   const D = DATA, i = dayIdx, t = viewFor(D, i);
@@ -455,7 +515,7 @@ function renderDay() {
   const strip = t.drinks ? `<div class="strip">
       <span class="n">${t.drinks}</span>
       <span class="pips">${"<i></i>".repeat(Math.min(t.drinks, 12))}</span>
-      <span class="txt">drinks this night${ok(hrvPct) ? ` · HRV <b>${hrvPct}%</b> of your sober average` : ""}${
+      <span class="txt">drinks the night before${ok(hrvPct) ? ` · HRV <b>${hrvPct}%</b> of your sober average` : ""}${
         ok(t.recovery) && ok(recBase) ? `, recovery <b>${t.recovery}</b> against a usual <b>${recBase}</b>` : ""}</span></div>` : "";
 
   const stepsDays = win(D, 30, 14), strainDays = win(D, 21, 10);
@@ -472,21 +532,14 @@ function renderDay() {
       ${stat(ok(t.steps) ? t.steps.toLocaleString() : "—", "Steps", col("steps"))}${stat(ok(t.debt) ? hm(t.debt) : "—", "Sleep debt")}
     </div>${latest ? `<p class="note">Today is still in progress — strain, steps and time-in-zone are running
       totals and keep climbing until midnight.</p>` : ""}</div>
-    ${card("Heart rate — overnight", ch.hrIntraday(W, {
-        curve: D.curves[i], drinks: D.drinkTimes[i],
-        sleepStart: D.hypnos[i]?.start ?? null, hrmax: D.hrmax, rhr: t.rhr,
-      }),
-      `Drag across the chart to read any point. The window starts two hours before sleep${t.drinks ? " or at the first drink, whichever came first" : ""} —
-       the six hours of evening either side of it were flattening the part that matters.
-       Zone edges use heart-rate reserve (Karvonen) from RHR ${ok(t.rhr) ? t.rhr : "—"} and HRmax ${D.hrmax}, not the
-       220−age shortcut, so they move as your fitness moves.${t.drinks ? " <b>Amber markers are the drinks</b> — the floor never returns to where it started." : ""}`)}
+    ${card("Heart rate", ch.hrIntraday(W, {
+        curve: D.curves[i], drinks: D.drinkTimes[i], hrmax: D.hrmax, rhr: t.rhr,
+      }))}
     ${card("Time in zone", `<div class="stats" style="grid-template-columns:repeat(5,1fr)">
       ${[0, 1, 2, 3, 4].map((k) => stat(Math.round(D.z[k]?.[i] || 0) + "m", "Z" + (k + 1), k ? ZONE[k] : null)).join("")}</div>`,
-      "The five buckets tile the whole day, so they sum to the time the band was recording.", false)}
-    ${card(`Steps — ${stepsDays} days`, ch.bars(W, D, D.steps, stepsDays, col("steps"), kfmt, "steps"),
-      `<b>${ok(t.steps) ? t.steps.toLocaleString() + " on this night's day." : "None recorded."}</b> Already fetched and cached by the sync — the Python dashboard never drew it.`)}
-    ${card(`Strain vs target — ${strainDays} days`, ch.strainHistory(W, D, strainDays),
-      "Green band is the recovery-scaled target; red bars overshot it. Amber dots carry the drink count.")}`;
+      "", false)}
+    ${card(`Steps — ${stepsDays} days`, ch.bars(W, D, D.steps, stepsDays, col("steps"), kfmt, "steps"))}
+    ${card(`Strain vs target — ${strainDays} days`, ch.strainHistory(W, D, strainDays))}`;
 
   // A night has no sleep until you have slept it. Measured on live data: the
   // current day comes back with strain 0.68, ~900 heart-rate samples and every
@@ -504,19 +557,10 @@ function renderDay() {
       ${stat(ok(sn.asleep) ? hm(sn.asleep) : "—", "Asleep")}${stat(ok(sn.eff) ? sn.eff + "%" : "—", "Efficiency")}
       ${stat(ok(sn.need) ? hm(sn.need) : "—", "Needed")}${stat(ok(sn.score) ? sn.score : "—", "Sleep score", sn.score >= 80 ? col("good") : col("awake"))}
     </div></div>
-    ${card("Hypnogram", ch.hypnogram(W, hyp),
-      `One continuous ribbon rather than four totals: depth is vertical position, and the connectors
-       make each descent visible. <b>C1, C2… mark completed cycles</b> at every REM exit.
-       ${ok(hyp?.nadirBpm) ? `The teal marker is the <b>heart-rate floor</b> — ${hyp.nadirBpm} bpm,
-         ${hm(hyp.nadirMin)} after falling asleep. On a sober night that floor usually lands within
-         the first 90 minutes; alcohol pushes it later and keeps it higher.` : ""}
-       ${t.drinks ? "Alcohol shows up as structure — deep sleep front-loaded, REM pushed late and short." : ""}`, false)}
-    ${card("Stages vs your 30-night baseline", ch.stagesVsBaseline(W, D, sn),
-      "Faded bar is your 30-night average, solid is this night. <b>REM is the stage alcohol takes first</b> — and deep sleep often goes <i>up</i>, which is why the score alone can flatter a wrecked night.", false)}
-    ${card(`Sleep consistency — last ${colDays} nights`, ch.sleepColumns(W, D, colDays),
-      "Each night stacked by stage on a shared duration axis. Amber dots mark drinking nights.")}
-    ${card(`Sleep debt — ${debtDays} days`, ch.debtArea(W, D, debtDays),
-      "Rolling shortfall against your nightly need. Three short nights is a week of catching up.")}`;
+    ${card("Hypnogram", ch.hypnogram(W, hyp), "", false)}
+    ${card("Stages vs your 30-night baseline", ch.stagesVsBaseline(W, D, sn), "", false)}
+    ${card(`Sleep consistency — last ${colDays} nights`, ch.sleepColumns(W, D, colDays))}
+    ${card(`Sleep debt — ${debtDays} days`, ch.debtArea(W, D, debtDays))}`;
 
   primeReadouts($("dash"));
 }
@@ -526,12 +570,15 @@ function renderDay() {
 // below. The four trend charts are windowed reads of the *same* day-count.
 function renderTrends(D) {
   const { m: perDrink } = ch.slope(D);
+  const nights = D.drinks.filter(Boolean).length;
+  // Hand-built rather than card(): the prose under every chart is gone, but the
+  // fitted slope is the one number this whole project exists to produce, so it
+  // gets the readout treatment the scrubbable charts get -- a value line, not a
+  // paragraph. Losing it with the prose would have been the one real casualty.
   $("trends").innerHTML = `
-    ${card("Drinks vs next-morning HRV", ch.doseResponse(W, D),
-      `<b>The chart this project exists for.</b> The fit currently reads
-       <b>${perDrink.toFixed(1)}% of baseline HRV per drink</b>. One dot per night, amber where drinks
-       were logged; the dashed line is your sober average. With ~20 drinking nights the slope becomes
-       your personal dose–response — measured on you, not taken from a guideline.`, false)}
+    <div class="card"><h2>Drinks vs next-morning HRV</h2>
+      <p class="readout live"><b>${perDrink.toFixed(1)}% of baseline HRV per drink</b><span>${nights} drinking night${nights === 1 ? "" : "s"}</span></p>
+      <div class="chartbox">${ch.doseResponse(W, D)}</div></div>
     <div class="range" role="tablist" aria-label="Trend window">
       ${RANGE_PRESETS.map((n) => `<button class="rbtn" role="tab" aria-selected="false" data-days="${n}" type="button">${n}d</button>`).join("")}
     </div>
@@ -554,14 +601,10 @@ function pickDefaultRange(D) {
 function renderTrendCharts(D, days) {
   $("trends").querySelectorAll(".rbtn").forEach((b) => b.setAttribute("aria-selected", String(Number(b.dataset.days) === days)));
   $("trend-cards").innerHTML = `
-    ${card(`HRV (rMSSD) — ${days} days`, ch.sparkline(W, D, D.hrv, col("accent"), days, "ms"),
-      "Amber dots are mornings after drinking. The most responsive alcohol marker on a wearable, and the noisiest night to night.")}
-    ${card(`Resting heart rate — ${days} days`, ch.sparkline(W, D, D.rhr, col("warn"), days, "bpm"),
-      "Less responsive than HRV but far steadier — a +5bpm morning is hard to explain any other way.")}
-    ${card(`Steps — ${days} days`, ch.bars(W, D, D.steps, days, col("steps"), kfmt, "steps"),
-      "Worth reading against strain: high steps with low strain is a long walk; the reverse is a hard session.")}
-    ${card(`Sleep score — ${days} nights`, ch.sparkline(W, D, D.score, col("rem"), days, ""),
-      "Treat with suspicion on drinking nights: front-loaded slow-wave sleep holds the score up while REM collapses.")}`;
+    ${card(`HRV (rMSSD) — ${days} days`, ch.sparkline(W, D, D.hrv, col("accent"), days, "ms"))}
+    ${card(`Resting heart rate — ${days} days`, ch.sparkline(W, D, D.rhr, col("warn"), days, "bpm"))}
+    ${card(`Steps — ${days} days`, ch.bars(W, D, D.steps, days, col("steps"), kfmt, "steps"))}
+    ${card(`Sleep score — ${days} nights`, ch.sparkline(W, D, D.score, col("rem"), days, ""))}`;
   primeReadouts($("trend-cards"));
 }
 

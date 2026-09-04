@@ -39,10 +39,21 @@ from . import render
 # minute it is 4.9 KB and pixel-identical at any sane chart width.
 CURVE_BUCKET_SEC = 60
 
-# The night view spans two calendar days, so the window is anchored on the
-# sleep session rather than midnight.
-CURVE_PAD_BEFORE_H = 6
-CURVE_PAD_AFTER_H = 2
+# hr_curve is one CIVIL DAY, 00:00 to 24:00 local.
+#
+# It used to be anchored on the sleep session (sleep_start - 6h to sleep_end
+# + 2h), which meant roughly 09:00-17:30 of every day was simply never stored:
+# the dashboard could not draw an afternoon because no afternoon existed in the
+# database. Anchoring on midnight instead makes the Day tab agree with the
+# other things on it -- steps, strain and zone_min were always civil-day totals
+# for the row's own date, and the heart-rate curve was the one panel keeping
+# different hours from its neighbours.
+#
+# A drinking session straddles this boundary (9pm-1am lands on two days), which
+# is deliberate and handled in the browser: the PWA now picks drink markers by
+# timestamp-within-the-drawn-window rather than by night key, and the day
+# stepper walks across the split.
+CURVE_DAY_H = 24
 
 
 # ------------------------------------------------------------------- config
@@ -144,13 +155,22 @@ def _clean(v):
     return v
 
 
-def _curve(hr, start, end):
-    """One-minute mean bpm across the sleep window, as [["HH:MM", bpm], ...]."""
-    if hr is None or hr.empty or pd.isna(start) or pd.isna(end):
+def _curve(hr, day):
+    """One-minute mean bpm across one civil day, as [["HH:MM", bpm], ...].
+
+    Timestamps are naive local civil time throughout this codebase (see
+    _clean), so normalising `day` and adding 24 hours is the whole boundary --
+    no zone conversion here, and none wanted: the day this belongs to was
+    already decided upstream.
+
+    Today comes back partial, ending at the last sample the watch has synced,
+    which is the honest answer for a day still in progress.
+    """
+    if hr is None or hr.empty or pd.isna(day):
         return None
-    lo = start - pd.Timedelta(hours=CURVE_PAD_BEFORE_H)
-    hi = end + pd.Timedelta(hours=CURVE_PAD_AFTER_H)
-    w = hr[(hr["ts"] >= lo) & (hr["ts"] <= hi)]
+    lo = pd.Timestamp(day).normalize()
+    hi = lo + pd.Timedelta(hours=CURVE_DAY_H)
+    w = hr[(hr["ts"] >= lo) & (hr["ts"] < hi)]
     if w.empty:
         return None
     g = (w.set_index("ts")["bpm"]
@@ -299,7 +319,7 @@ def build_rows(con=None):
             "stages": _stages(night_obj),
             "hr_nadir_bpm": _clean(nadir_bpm),
             "hr_nadir_at": _clean(nadir_at),
-            "hr_curve": _curve(hr, start, end),
+            "hr_curve": _curve(hr, night),
         })
     # int columns in Postgres reject 374.5
     for row in rows:

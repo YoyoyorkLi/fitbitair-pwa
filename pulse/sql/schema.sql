@@ -206,6 +206,32 @@ insert into public.sync_state (id) values (1) on conflict do nothing;
 -- dataset -- the payoff chart is:
 --     select std_drinks, hrv_pct_baseline from night_summary where std_drinks > 0
 --
+-- ---------------------------------------------------------------------------
+-- THE JOIN IS OFFSET BY A DAY, and it has to be. The two tables key their
+-- "night" from opposite ends of the same sleep:
+--
+--   drinks.night   the EVENING you drank. drink_night() subtracts 4 hours, so
+--                  9pm Sep 2 and 1am Sep 3 both bucket to Sep 2.
+--   nights.night   the MORNING the sleep ended. metrics.py:272 and :387 key
+--                  every row by n["end"].normalize(), and steps / strain /
+--                  zone_min on that row are that calendar day's totals.
+--
+-- So the sleep that answers "what did Sep 2's drinking do to me" is the row
+-- dated Sep 3, not Sep 2. Verified against real cached data: sleep sessions
+-- run 01:19-03:13 to ~08:20, so a night's drinking (which ends before the 4am
+-- cut) always buckets to the day BEFORE the row holding the sleep it wrecked.
+--
+-- Joining d.night = n.night instead -- which is what this view did until this
+-- was caught -- pairs each drinking night with the morning roughly twenty
+-- hours BEFORE the first drink. The dose-response chart still drew a slope;
+-- it was just measuring the wrong pair, and the sign of a real effect is
+-- easily mistaken for the noise of a fake one.
+--
+-- The `night` this view exposes stays the nights-row date (the morning), NOT
+-- the drinking evening. Relabelling to the evening would line the drinks up
+-- with the label but silently misdate steps, strain and zone_min, which are
+-- day totals for the row's own date.
+--
 -- FULL OUTER JOIN, and both halves are load-bearing:
 --
 --   nights with no drinks  -- sober nights. Not padding: they define the
@@ -228,7 +254,9 @@ insert into public.sync_state (id) values (1) on conflict do nothing;
 -- loadLive() selects "*" from it and expects exactly these column names.
 create or replace view public.night_summary with (security_invoker = true) as
 select
-  coalesce(n.night, d.night) as night,
+  -- d.night + 1 on the drinks-only side: a night in progress has no nights row
+  -- yet, and the morning it belongs to is the next day.
+  coalesce(n.night, d.night + 1) as night,
   coalesce(d.drinks, 0)      as drinks,
   coalesce(d.std_drinks, 0)  as std_drinks,
   d.first_drink,
@@ -263,7 +291,7 @@ full outer join (
          max(logged_at)  as last_drink
   from public.drinks
   group by night
-) d on d.night = n.night;
+) d on d.night = n.night - 1;   -- drinks the evening before this row's morning
 
 
 -- ---------------------------------------------------------------------- RLS
