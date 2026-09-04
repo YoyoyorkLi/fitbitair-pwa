@@ -38,7 +38,7 @@ const stat = (v, k, c) => `<div class="stat"><div class="v"${c ? ` style="color:
 // just asked for, and lifting it takes the answer away with it.
 const card = (ttl, inner, note, scrub = true) =>
   `<div class="card"><h2>${ttl}</h2>${scrub ? `<p class="readout" aria-live="polite"></p>` : ""}
-   <div class="chartbox">${inner}</div>${note ? `<p class="note">${note}</p>` : ""}</div>`;
+   <div class="chartbox${/data-scrub/.test(inner) ? " scrubbable" : ""}">${inner}</div>${note ? `<p class="note">${note}</p>` : ""}</div>`;
 
 let sb = null, DATA = null, isDemo = false;
 
@@ -139,7 +139,7 @@ function bindTips(root) {
 const DBG = new URLSearchParams(location.search).has("debug");
 // Bumped by hand whenever the scrubber changes. Compared against the commit
 // /api/config reports, so a stale cached bundle is visible instead of inferred.
-const BUILD = "scrub-touchaction-none";
+const BUILD = "scrub-container-none";
 let dbgBox = null;
 function dbg(line) {
   if (!DBG) return;
@@ -358,7 +358,7 @@ async function boot() {
         if (DBG) {
           fetch(`/api/config?nocache=${Date.now()}`, { cache: "no-store" })
             .then((r) => r.json())
-            .then((c) => dbg(`BUILD ${BUILD} | server ${c.commit || "?"} | ${BUILD === "scrub-touchaction-none" ? "app.js is current" : "?"}`))
+            .then((c) => dbg(`BUILD ${BUILD} | server ${c.commit || "?"} | ${BUILD === "scrub-container-none" ? "app.js is current" : "?"}`))
             .catch(() => dbg(`BUILD ${BUILD} | server unreachable`));
         }
         sb = createClient(cfg.url, cfg.anonKey);

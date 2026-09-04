@@ -105,6 +105,17 @@ a{color:var(--accent)}
    gaps between them, so there is plenty of page left to scroll from -- and a
    scrubber that works beats a scroll target that duplicates the rest of the
    page. */
+/* Declared on the HTML container, and on the svg, and via :has() -- three
+   spellings of the same rule because WebKit is unreliable about exactly one
+   of them.
+   touch-action hit testing is not performed on individual SVG objects, only
+   the top-level <svg>, and WebKit's touch-action support has historically
+   been partial (pan-x/pan-y unimplemented, which is why the pan-y this
+   started with was silently behaving as auto). A plain HTML div is the one
+   place the property is reliably honoured, so the container carries it and
+   the svg keeps it as a second line. */
+.chartbox.scrubbable,
+.chartbox:has(svg[data-scrub]){touch-action:none}
 .chartbox svg[data-scrub]{touch-action:none;cursor:crosshair}
 
 /* Where a scrubbed value lands: pinned under the card title, above the chart,
