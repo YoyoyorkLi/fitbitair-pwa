@@ -49,6 +49,14 @@
     <button class="tab" role="tab" aria-selected="false" data-tab="trends">Trends</button>
   </div>
 
+  <!-- Sticks to the top of the viewport whenever you are NOT on the newest
+       night. The date lives in the header, the header scrolls away, and every
+       tile below it silently changes meaning -- without this there is nothing
+       on screen telling you a full 24h curve is yesterday's rather than a
+       clock that has run fast. Absent entirely on the latest night, so it
+       costs no space in the normal case. -->
+  <button class="pastbar" id="pastbar" type="button" hidden></button>
+
   <div class="banner" id="demo-banner" hidden>
     <b>Synthetic data</b> — from <code>pulse demo</code>, with the documented alcohol effect on HRV,
     REM and resting HR simulated on nights that have drinks. Shows the shape, not your numbers.

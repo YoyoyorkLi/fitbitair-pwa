@@ -208,9 +208,21 @@ function bindScrub(root) {
 // hidden until touched -- the number is useful unprompted, a line across the
 // chart is not.
 function primeReadouts(root) {
+  // Date-indexed charts prime to THE SELECTED DAY, not to their newest bar.
+  // Priming to the newest put a different date in the readout from the one in
+  // the tiles above it -- step back a day and the stats said Sep 2 while the
+  // steps chart said Sep 3. Two dates on one screen with nothing saying which
+  // was which, which is how a full 24h of yesterday gets read as a clock
+  // running fast. They all end on the newest night, so the selected day is
+  // simply that many bands back from the right edge.
+  const back = DATA ? DATA.dates.length - 1 - dayIdx : 0;
   for (const s of root.querySelectorAll("svg[data-scrub]")) {
     const bands = bandsOf(s);
-    if (bands.length) setScrub(s, bands.length - 1, false);
+    if (!bands.length) continue;
+    const idx = s.dataset.scrub === "day"
+      ? Math.max(0, bands.length - 1 - back)   // clamped: the day may predate this window
+      : bands.length - 1;                       // time-indexed (heart rate): latest sample
+    setScrub(s, idx, false);
   }
 }
 
@@ -219,15 +231,25 @@ function primeReadouts(root) {
 // strict: 64px of travel and twice as much horizontal as vertical, or a thumb
 // drifting during a normal scroll would throw you onto another night.
 function bindSwipe(root) {
-  let sx = 0, sy = 0, live = false;
+  let sx = 0, sy = 0, sTop = 0, live = false;
   root.addEventListener("pointerdown", (e) => {
     if (e.pointerType === "mouse") return;
     if (e.target.closest?.("svg[data-scrub], button, a, input")) return;
-    sx = e.clientX; sy = e.clientY; live = true;
+    sx = e.clientX; sy = e.clientY; sTop = scrollY; live = true;
   });
+  // iOS hands a gesture to its own scroller and CANCELS our pointer rather than
+  // ending it. Without this the flag stayed set, and a later, unrelated
+  // pointerup got measured against a stale start point -- which silently
+  // stepped the day. That is how you end up reading yesterday without having
+  // touched the date control.
+  root.addEventListener("pointercancel", () => { live = false; });
   root.addEventListener("pointerup", (e) => {
     if (!live) return;
     live = false;
+    // If the page moved under the finger, that was a scroll, whatever the net
+    // horizontal distance ended up being. Cheaper and far more reliable than
+    // trying to out-guess the gesture from dx/dy alone.
+    if (Math.abs(scrollY - sTop) > 8) return;
     const dx = e.clientX - sx, dy = e.clientY - sy;
     if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 2) return;
     if (currentTab() === "trends") return;
@@ -486,6 +508,10 @@ function updateDayNav(D, i) {
   $("day-next").disabled = latest;
   $("daynav").classList.toggle("stepped", !latest);
   $("daynav").classList.toggle("stale", latest && stale);
+
+  const pb = $("pastbar");
+  pb.hidden = latest;
+  if (!latest) pb.textContent = `Viewing ${label} — tap for latest`;
 }
 
 // "12 min ago" is wrong sixty seconds later, and this app gets left open on a
@@ -631,6 +657,7 @@ $("trends").addEventListener("click", (e) => {
 $("day-prev").addEventListener("click", () => setDay(dayIdx - 1));
 $("day-next").addEventListener("click", () => setDay(dayIdx + 1));
 $("stamp").addEventListener("click", () => DATA && setDay(DATA.dates.length - 1));
+$("pastbar").addEventListener("click", () => DATA && setDay(DATA.dates.length - 1));
 addEventListener("keydown", (e) => {
   if (!DATA || $("dash").hidden || currentTab() === "trends") return;
   if (e.target.matches?.("input,textarea")) return;

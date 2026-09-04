@@ -66,7 +66,7 @@ const padR = (W) => (narrow(W) ? 10 : 14);
 
 function svg(w, h, body, label, scrub) {
   return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" role="img"
-    ${scrub ? 'data-scrub="1"' : ""} aria-label="${esc(label)}">${body}</svg>`;
+    ${scrub ? `data-scrub="${scrub}"` : ""} aria-label="${esc(label)}">${body}</svg>`;
 }
 const txt = (x, y, s, { size = 10.5, fill = "muted", anchor = "end", weight = 400 } = {}) =>
   `<text x="${Number(x).toFixed(1)}" y="${Number(y).toFixed(1)}" text-anchor="${anchor}" fill="${col(fill)}"
@@ -388,7 +388,7 @@ export function hrIntraday(W, { curve, drinks = [], hrmax, rhr }) {
     p += txt(X(m), yAxis, tick12(m), { size: 9.5, anchor: "middle" });
   }
   p += scrubLayer(y0, y1);
-  return svg(W, h, p, "Heart rate across the night with zone bands and drink markers", true);
+  return svg(W, h, p, "Heart rate across the night with zone bands and drink markers", "time");
 }
 
 // -------------------------------------------------------------------- bars
@@ -413,7 +413,7 @@ export function bars(W, D, vals, days, color, fmt, unit) {
   p += [0, hi / 2, hi].map((x) => txt(x0 - 8, s.y(x) + 4, fmt(x))).join("");
   p += dateAxis(W, D.dates, i0, n, s, h - 8);
   p += scrubLayer(y0, y1);
-  return svg(W, h, p, `${unit} over ${n} days`, true);
+  return svg(W, h, p, `${unit} over ${n} days`, "day");
 }
 
 export function strainHistory(W, D, days) {
@@ -449,7 +449,7 @@ export function strainHistory(W, D, days) {
     }, (i) => (ok(D.strain[i0 + i]) ? s.y(D.strain[i0 + i]) : null)) +
     [0, hi / 2, hi].map((v) => txt(x0 - 7, s.y(v) + 4, v.toFixed(0))).join("") +
     dateAxis(W, D.dates, i0, n, s, h - 8) + scrubLayer(y0, y1);
-  return svg(W, h, p, "Strain against the recovery-scaled target band", true);
+  return svg(W, h, p, "Strain against the recovery-scaled target band", "day");
 }
 
 export function stagesVsBaseline(W, D, t) {
@@ -496,7 +496,7 @@ export function debtArea(W, D, days) {
     // half-hour was never the point of a debt trend.
     [0, hi / 2, hi].map((x) => txt(x0 - 7, s.y(x) + 4, Math.round(x / 60) + "h")).join("") +
     dateAxis(W, D.dates, i0, n, s, h - 8) + scrubLayer(y0, y1);
-  return svg(W, h, p, "Rolling sleep debt", true);
+  return svg(W, h, p, "Rolling sleep debt", "day");
 }
 
 export function sleepColumns(W, D, days) {
@@ -523,7 +523,7 @@ export function sleepColumns(W, D, days) {
   });
   p += [0, 4, 8, 12].map((hh) => txt(x0 - 8, s.y(hh * 60) + 4, hh + "h")).join("");
   p += dateAxis(W, D.dates, i0, n, s, h - 8) + scrubLayer(y0, y1);
-  return svg(W, h, p, "Sleep duration and composition over recent nights", true);
+  return svg(W, h, p, "Sleep duration and composition over recent nights", "day");
 }
 
 export function sparkline(W, D, vals, color, days, unit) {
@@ -550,7 +550,7 @@ export function sparkline(W, D, vals, color, days, unit) {
     // 270px gutter is noise, and the card title already says what this is.
     [lo, (lo + hi) / 2, hi].map((x, k) => txt(x0 - 8, s.y(x) + 4, Math.round(x) + (k === 2 && unit && !narrow(W) ? " " + unit : ""))).join("") +
     dateAxis(W, D.dates, i0, n, s, h - 8) + scrubLayer(y0, y1);
-  return svg(W, h, p, `Trend over ${n} days`, true);
+  return svg(W, h, p, `Trend over ${n} days`, "day");
 }
 
 // The payoff chart.
