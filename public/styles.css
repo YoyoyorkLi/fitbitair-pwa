@@ -114,8 +114,16 @@ a{color:var(--accent)}
    started with was silently behaving as auto). A plain HTML div is the one
    place the property is reliably honoured, so the container carries it and
    the svg keeps it as a second line. */
-.chartbox.scrubbable,
-.chartbox:has(svg[data-scrub]){
+/* The descendant selector is the point. touch-action is NOT an inherited
+   property, so setting it on .chartbox and on the <svg> left every <rect>,
+   <line> and <text> inside them at auto -- and the element a finger actually
+   lands on is one of those rects, never the container. If WebKit resolves
+   touch-action from the hit element rather than walking up to an ancestor
+   (its SVG hit-testing has never matched the spec), then none of the previous
+   declarations applied to the thing being touched, which is consistent with
+   the device reporting zero move events of either kind. */
+.chartbox.scrubbable, .chartbox.scrubbable *,
+.chartbox:has(svg[data-scrub]), .chartbox:has(svg[data-scrub]) *{
   touch-action:none;
   /* The device log showed every gesture arriving as pointerdown -> pointerup
      with ZERO pointermove in between, on 7-, 14- and 270-band charts alike,

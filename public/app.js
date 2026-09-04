@@ -139,7 +139,7 @@ function bindTips(root) {
 const DBG = new URLSearchParams(location.search).has("debug");
 // Bumped by hand whenever the scrubber changes. Compared against the commit
 // /api/config reports, so a stale cached bundle is visible instead of inferred.
-const BUILD = "scrub-bothstreams";
+const BUILD = "scrub-descendants";
 let dbgBox = null;
 function dbg(line) {
   if (!DBG) return;
@@ -356,7 +356,7 @@ async function boot() {
         if (DBG) {
           fetch(`/api/config?nocache=${Date.now()}`, { cache: "no-store" })
             .then((r) => r.json())
-            .then((c) => dbg(`BUILD ${BUILD} | server ${c.commit || "?"} | ${BUILD === "scrub-bothstreams" ? "app.js is current" : "?"}`))
+            .then((c) => dbg(`BUILD ${BUILD} | server ${c.commit || "?"} | ${BUILD === "scrub-descendants" ? "app.js is current" : "?"}`))
             .catch(() => dbg(`BUILD ${BUILD} | server unreachable`));
         }
         sb = createClient(cfg.url, cfg.anonKey);
