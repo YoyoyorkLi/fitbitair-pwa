@@ -132,6 +132,25 @@ function bindTips(root) {
 // has a `rect[data-i]` hit band carrying data-x (centre, in user units),
 // optional data-y (the mark, for the cursor dot) and data-tip (the text).
 // Nothing here re-derives a scale, so the crosshair cannot drift from the marks.
+// ---- touch diagnostics, behind ?debug ------------------------------------
+// Two fixes for the same frozen-scrubber bug were built on reasoning a desktop
+// browser could not falsify, and both were wrong. This prints what the phone
+// actually does. Entirely inert without the query param.
+const DBG = new URLSearchParams(location.search).has("debug");
+let dbgBox = null;
+function dbg(line) {
+  if (!DBG) return;
+  if (!dbgBox) {
+    dbgBox = document.createElement("pre");
+    dbgBox.style.cssText =
+      "position:fixed;left:0;right:0;bottom:0;z-index:9999;max-height:40vh;overflow:auto;" +
+      "margin:0;padding:8px;background:rgba(0,0,0,.88);color:#3FD68A;" +
+      "font:11px/1.35 ui-monospace,SFMono-Regular,monospace;white-space:pre-wrap";
+    document.body.appendChild(dbgBox);
+  }
+  dbgBox.textContent = (line + "\n" + dbgBox.textContent).slice(0, 3000);
+}
+
 function bandsOf(svgEl) {
   if (!svgEl._bands) {
     svgEl._bands = [...svgEl.querySelectorAll("rect[data-i]")];
@@ -171,15 +190,16 @@ function setScrub(svgEl, idx, live = true) {
 
 function scrubAt(svgEl, clientX) {
   const bands = bandsOf(svgEl);
-  if (!bands.length) return;
+  if (!bands.length) return dbg("scrubAt: NO BANDS");
   const r = svgEl.getBoundingClientRect();
-  if (!r.width) return;
+  if (!r.width) return dbg("scrubAt: rect width 0 (detached?)");
   // Pointer x -> user units. viewBox width is the chart's own coordinate space,
   // which equals its CSS width by construction but is read rather than assumed
   // so a mid-resize render cannot put the crosshair somewhere else.
   const ux = ((clientX - r.left) / r.width) * svgEl.viewBox.baseVal.width;
   let best = 0, bd = Infinity;
   svgEl._xs.forEach((x, i) => { const d = Math.abs(x - ux); if (d < bd) { bd = d; best = i; } });
+  dbg(`scrubAt ux=${ux.toFixed(0)} -> band ${best}/${bands.length}`);
   setScrub(svgEl, best);
 }
 
@@ -225,6 +245,7 @@ function bindScrub(root) {
 
   root.addEventListener("touchstart", (e) => {
     const s = e.target.closest?.("svg[data-scrub]");
+    dbg(`touchstart on <${e.target.tagName}> -> ${s ? s.dataset.scrub + " chart, " + s.querySelectorAll("rect[data-i]").length + " bands" : "NO SCRUB SVG"}`);
     if (!s) return;
     const t = e.changedTouches[0];
     drag = s; tId = t.identifier; axis = null;
@@ -233,8 +254,10 @@ function bindScrub(root) {
   }, { passive: true });
 
   // Deliberately NOT passive: this listener has to be able to preventDefault.
+  let moves = 0;
   root.addEventListener("touchmove", (e) => {
-    if (!drag) return;
+    if (!drag) return dbg("touchmove but drag=null");
+    moves++;
     const t = [...e.touches].find((x) => x.identifier === tId) || e.touches[0];
     if (!t) return;
 
@@ -242,6 +265,7 @@ function bindScrub(root) {
       const dx = Math.abs(t.clientX - tX), dy = Math.abs(t.clientY - tY);
       if (dx < AXIS_SLOP && dy < AXIS_SLOP) return;  // too early to tell
       axis = dx > dy ? "x" : "y";
+      dbg(`axis=${axis} after ${moves} moves (dx=${dx.toFixed(0)} dy=${dy.toFixed(0)}) cancelable=${e.cancelable}`);
       if (axis === "y") { drag = null; return; }     // a scroll: hands off
     }
     // cancelable is false once the browser has already begun scrolling; calling
@@ -251,8 +275,16 @@ function bindScrub(root) {
   }, { passive: false });
 
   for (const ev of ["touchend", "touchcancel"]) {
-    addEventListener(ev, () => { drag = null; axis = null; });
+    addEventListener(ev, (e) => { dbg(`${e.type} after ${moves} moves, axis=${axis}`); moves = 0; drag = null; axis = null; });
   }
+  // Are pointer events firing for touch at all? The touch path ignores them,
+  // but knowing whether they arrive distinguishes "gesture stolen" from
+  // "listener never ran".
+  addEventListener("pointerdown", (e) => { if (e.pointerType === "touch") dbg("pointerdown(touch) seen"); }, { passive: true });
+  let pmoves = 0;
+  addEventListener("pointermove", (e) => {
+    if (e.pointerType === "touch" && ++pmoves % 5 === 0) dbg(`pointermove(touch) x${pmoves}`);
+  }, { passive: true });
 }
 
 // Every scrubbable chart starts showing its newest sample, so the readout row
