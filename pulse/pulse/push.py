@@ -332,7 +332,36 @@ def build_rows(con=None):
 
 
 # --------------------------------------------------------------------- push
+def _require_timezone():
+    """Refuse to write anything unless the zone was configured ON PURPOSE.
+
+    metrics._tz() falls back to UTC with nothing but a warnings.warn(), which
+    on a CI runner means a green tick over a database full of UTC-framed
+    nights: evening activity filed on the next day, a "today" row that exists
+    two hours before today does, and an hr_curve whose midnight is 7pm. It
+    looks like plausible data, which is why it survived unnoticed.
+
+    Explicit UTC is fine -- someone genuinely in UTC sets PULSE_TZ=UTC. What is
+    never fine is *inferred* UTC, which is what a runner gives you when the
+    secret is missing. So the test is whether PULSE_TZ was set, not what it
+    resolved to.
+    """
+    if not cfg.TIMEZONE:
+        raise SystemExit(
+            "PULSE_TZ is not set -- refusing to push.\n"
+            "  Without it every night is bucketed in UTC: evening activity lands on\n"
+            "  the wrong day and the day chart's midnight is 7pm local.\n"
+            "  CI    : add PULSE_TZ (e.g. America/Chicago) under\n"
+            "          Settings -> Secrets and variables -> Actions\n"
+            "  Local : python -m pulse setup, or PULSE_TZ=America/Chicago in .env")
+    if mx._tz() is None:
+        raise SystemExit(
+            f"PULSE_TZ={cfg.TIMEZONE!r} is not a valid IANA zone -- refusing to push.\n"
+            "  Use a name like America/Chicago, not an abbreviation or an offset.")
+
+
 def push(rows=None, verbose=True):
+    _require_timezone()
     url, key = _creds()
     rows = build_rows() if rows is None else rows
     if not rows:
