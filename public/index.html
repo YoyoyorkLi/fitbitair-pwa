@@ -40,6 +40,9 @@
       <button class="nav" id="day-prev" type="button" aria-label="Previous night">‹</button>
       <button class="stamp" id="stamp" type="button"></button>
       <button class="nav" id="day-next" type="button" aria-label="Next night">›</button>
+      <!-- Hidden on the demo, and until a live session exists: without one
+           /api/sync has nothing to authenticate and would only ever 401. -->
+      <button class="nav sync" id="sync-btn" type="button" aria-label="Sync now" title="Sync now" hidden><span>⟳</span></button>
     </div>
   </div>
 

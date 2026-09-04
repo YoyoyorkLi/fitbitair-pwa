@@ -484,6 +484,133 @@ function setDay(i) {
   renderDay();
 }
 
+// ------------------------------------------------------------------- sync
+// GitHub's schedule is best-effort: the cron asks hourly, observed gaps run
+// 2.5-4h. This is the "no, now" button. The work happens on GitHub, not here
+// -- /api/sync returns the moment the dispatch is accepted -- so the phone can
+// lock and the app can close while it runs. Polling below only exists to
+// notice when it lands while you happen to still be looking.
+//
+// null | "busy" | {error}. Rendered through updateDayNav's suffix rather than
+// as new chrome: the stamp is already the freshness indicator, and a second
+// place to look for the same answer is a worse header, not a better one.
+let syncUi = null;
+let syncPoll = null, syncSince = null, syncChecking = false, syncErrTimer = null;
+
+function setSyncUi(state) {
+  syncUi = state;
+  clearTimeout(syncErrTimer);
+  // An error must not squat on the freshness stamp forever. It has said its
+  // piece after twenty seconds, and "synced 12 min ago" is more useful than a
+  // stale complaint about a network blip that has long since passed. A run
+  // that genuinely FAILED still shows through, because updateDayNav reads
+  // that from sync_state.last_ok rather than from here.
+  if (state?.error) {
+    syncErrTimer = setTimeout(() => { if (syncUi?.error) setSyncUi(null); }, 20_000);
+  }
+  const btn = $("sync-btn");
+  btn.disabled = state === "busy";
+  btn.title = state === "busy" ? "Syncing…" : state?.error ? state.error : "Sync now";
+  if (DATA && !$("dash").hidden) updateDayNav(DATA, dayIdx);
+}
+
+async function syncNow() {
+  if (!sb || syncUi === "busy") return;
+  let token;
+  try {
+    const { data } = await sb.auth.getSession();
+    token = data?.session?.access_token;
+  } catch { /* handled below */ }
+  if (!token) return setSyncUi({ error: "sign in first" });
+
+  // Read the baseline STRAIGHT FROM THE SERVER rather than from DATA.sync.
+  // loadLive()'s sync_state read is deliberately wrapped in a catch so a
+  // failure there cannot blank the dashboard -- which means DATA.sync can be
+  // undefined while the column holds a real timestamp. Seeding the comparison
+  // from that would make the very first poll see "null !== <timestamp>",
+  // declare the sync finished a second after dispatch, and reload the same
+  // stale data. Comparing values, not clocks, also keeps this immune to device
+  // clock skew.
+  try {
+    const { data: s0 } = await sb
+      .from("sync_state").select("last_sync_at").eq("id", 1).maybeSingle();
+    syncSince = s0?.last_sync_at ?? null;
+  } catch {
+    return setSyncUi({ error: "no connection" });
+  }
+  setSyncUi("busy");
+  try {
+    const res = await fetch("/api/sync", { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+    const body = await res.json().catch(() => ({}));
+    // 409 means one was already running -- that is a success for our purposes
+    // (data is on its way), so watch for it to land rather than cry failure.
+    if (!res.ok && res.status !== 409) return setSyncUi({ error: body.error || `error ${res.status}` });
+    watchForSync();
+  } catch {
+    setSyncUi({ error: "no connection" });
+  }
+}
+
+// Has sync_state moved since we asked? That is the only honest "done" signal:
+// the workflow writes it last, on success AND on failure.
+async function checkSynced() {
+  // syncChecking, because the visibilitychange listener calls this directly
+  // and the poll can already be mid-await. Without it, coming back to the app
+  // at the wrong moment starts a second 45-night loadLive() and a second
+  // render() racing the first over DATA and dayIdx.
+  if (syncUi !== "busy" || !sb || syncChecking) return;
+  syncChecking = true;
+  try {
+    const { data: s } = await sb
+      .from("sync_state").select("last_sync_at,last_ok").eq("id", 1).maybeSingle();
+    if (!s?.last_sync_at || s.last_sync_at === syncSince) return;
+
+    stopWatching();
+    const wasOn = DATA?.dates?.[dayIdx];
+    const live = await loadLive();
+    if (live) {
+      DATA = normalize(live);
+      // Hold the night you were reading, by DATE not index -- a sync can add a
+      // row and shift every index under you.
+      const i = wasOn ? DATA.dates.indexOf(wasOn) : -1;
+      dayIdx = i >= 0 ? i : DATA.dates.length - 1;
+      render();
+    }
+    setSyncUi(s.last_ok === false ? { error: "sync failed" } : null);
+  } catch {
+    // Nothing may leave the button wedged on "busy". If the poll is still
+    // running the next tick retries and this was just a blip; if we already
+    // stopped it -- the throw came from loadLive(), after the timestamp had
+    // moved -- there is no tick left to recover us, so say so and re-enable.
+    if (!syncPoll) setSyncUi({ error: "couldn't refresh — reload" });
+  } finally {
+    syncChecking = false;
+  }
+}
+
+function stopWatching() { clearInterval(syncPoll); syncPoll = null; }
+
+function watchForSync() {
+  stopWatching();
+  const started = Date.now();
+  syncPoll = setInterval(() => {
+    // A run takes ~4 minutes; 12 is generous enough that giving up means
+    // something is actually wrong rather than merely slow.
+    if (Date.now() - started > 12 * 60_000) {
+      stopWatching();
+      return setSyncUi({ error: "timed out — check Actions" });
+    }
+    checkSynced();
+  }, 10_000);
+  checkSynced();
+}
+
+// iOS suspends timers in a backgrounded tab, so a sync that finishes while the
+// phone is locked would otherwise sit unnoticed until the next interval after
+// you return. Check immediately on the way back in.
+addEventListener("visibilitychange", () => { if (!document.hidden) checkSynced(); });
+$("sync-btn").addEventListener("click", syncNow);
+
 // The stamp doubles as the freshness indicator, which is why it replaces
 // "· latest" rather than sitting beside it: on the newest night "latest" was
 // only ever restating the disabled › button, and the question you actually
@@ -500,14 +627,24 @@ function updateDayNav(D, i) {
   const stale = !!s && (failed || !(mins < STALE_MIN));
 
   let suffix = "";
-  if (latest) suffix = s ? (failed ? "sync failed" : `synced ${ago(s.at)}`) : "latest";
+  if (latest) {
+    // An in-flight sync outranks the timestamp: "synced 3h ago" while a run is
+    // underway is true but useless, and the thing you want to know is that
+    // something is happening about it.
+    if (syncUi === "busy") suffix = "syncing…";
+    else if (syncUi?.error) suffix = syncUi.error;
+    else suffix = s ? (failed ? "sync failed" : `synced ${ago(s.at)}`) : "latest";
+  }
 
   $("stamp").textContent = suffix ? `${label} · ${suffix}` : label;
   $("stamp").title = latest ? "" : "Back to the latest night";
   $("day-prev").disabled = i <= 0;
   $("day-next").disabled = latest;
   $("daynav").classList.toggle("stepped", !latest);
-  $("daynav").classList.toggle("stale", latest && stale);
+  $("daynav").classList.toggle("stale", latest && (stale || !!syncUi?.error) && syncUi !== "busy");
+  // No point offering a sync the demo cannot run or an anonymous caller
+  // cannot authenticate.
+  $("sync-btn").hidden = isDemo || !sb;
 
   const pb = $("pastbar");
   pb.hidden = latest;

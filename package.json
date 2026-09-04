@@ -6,7 +6,7 @@
   "description": "Tap endpoint + PWA for Pulse. Point Vercel at this folder.",
   "scripts": {
     "dev": "vercel dev",
-    "test": "node lib/night.test.js && node lib/tag-auth.test.js && node lib/json-fixtures.test.js"
+    "test": "node lib/night.test.js && node lib/tag-auth.test.js && node lib/sync-endpoint.test.js && node lib/json-fixtures.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.58.0"
