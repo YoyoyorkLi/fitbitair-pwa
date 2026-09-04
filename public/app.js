@@ -184,23 +184,47 @@ function scrubAt(svgEl, clientX) {
 }
 
 function bindScrub(root) {
-  let drag = null;
+  let drag = null, sawPointerMove = false;
+
   root.addEventListener("pointerdown", (e) => {
     const s = e.target.closest?.("svg[data-scrub]");
     if (!s) return;
     drag = s;
-    // Capture on the svg so a finger that wanders off the chart vertically
-    // keeps scrubbing instead of dropping the gesture mid-drag.
-    try { s.setPointerCapture(e.pointerId); } catch { /* not all pointers */ }
+    sawPointerMove = false;
     scrubAt(s, e.clientX);
   });
-  root.addEventListener("pointermove", (e) => {
-    if (drag) { scrubAt(drag, e.clientX); return; }
+
+  // NO setPointerCapture, and the move listener is on window rather than the
+  // chart. Capture is the textbook way to keep receiving moves once a finger
+  // wanders off the element, and on iOS it is precisely what breaks this:
+  // WebKit stops delivering pointermove for a pointer captured on an SVG
+  // element, so the readout froze on whatever the first touch landed on while
+  // the finger kept moving -- the date appeared to track because the crosshair
+  // is where you are looking, but nothing was updating at all.
+  //
+  // A window listener needs no capture, cannot be revoked mid-gesture, and
+  // still sees moves that leave the chart. Synthetic events dispatched straight
+  // at the element bypass capture semantics entirely, which is why every test
+  // of this passed on a desktop browser.
+  addEventListener("pointermove", (e) => {
+    if (drag) { sawPointerMove = true; scrubAt(drag, e.clientX); return; }
     if (e.pointerType !== "mouse") return;          // touch scrubs only while down
     const s = e.target.closest?.("svg[data-scrub]");
     if (s) scrubAt(s, e.clientX);
-  });
-  for (const ev of ["pointerup", "pointercancel"]) addEventListener(ev, () => { drag = null; });
+  }, { passive: true });
+
+  // Belt and braces for the same WebKit bug: if pointermove never arrives for
+  // this gesture, touchmove still does. Guarded on sawPointerMove so browsers
+  // that fire both do not scrub twice per frame.
+  addEventListener("touchmove", (e) => {
+    if (!drag || sawPointerMove) return;
+    const t = e.touches && e.touches[0];
+    if (t) scrubAt(drag, t.clientX);
+  }, { passive: true });
+
+  for (const ev of ["pointerup", "pointercancel", "touchend", "touchcancel"]) {
+    addEventListener(ev, () => { drag = null; });
+  }
 }
 
 // Every scrubbable chart starts showing its newest sample, so the readout row
