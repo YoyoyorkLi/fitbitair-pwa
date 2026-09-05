@@ -262,16 +262,17 @@ def normalize_sleep(points):
     return sorted(out, key=lambda n: n["end"])
 
 
-def normalize_exercise(points):
-    """Workout sessions -- passively detected by the band, not logged by hand.
+# A session longer than this is real (a live account had one: forgot to stop
+# tracking, ~17h, WORKOUT), but it is not useful to display next to a day's
+# actual workouts -- it would swamp everything around it and read as broken
+# rather than as "I forgot to tap stop". Dropped from the list, not clamped:
+# strain itself is computed from the continuous heart-rate stream regardless,
+# so nothing about the day's actual numbers depends on this record surviving.
+MAX_SESSION_MIN = 360
 
-    activeDuration is a Duration string ("1231.200s"), separate from the
-    session's wall-clock interval ("true active time excluding pauses"). A live
-    account showed a WORKOUT with activeDuration=61423s (~17h) against a much
-    shorter interval -- an auto-detection artifact, not a real session -- so
-    activeDuration is clamped to the wall-clock span rather than trusted
-    outright.
-    """
+
+def normalize_exercise(points):
+    """Workout sessions -- passively detected by the band, not logged by hand."""
     out = []
     for p in points:
         e = p.get("exercise")
@@ -282,9 +283,12 @@ def normalize_exercise(points):
             continue
         start, end = to_local(iv["startTime"]), to_local(iv["endTime"])
         span_min = (end - start).total_seconds() / 60
-        if span_min <= 0:
+        if span_min <= 0 or span_min > MAX_SESSION_MIN:
             continue
 
+        # activeDuration ("true active time excluding pauses") is a Duration
+        # string ("1231.200s"), separate from the interval above -- but on a
+        # genuine session it should never exceed it by much.
         dur = e.get("activeDuration") or ""
         active_min = _f(dur[:-1]) / 60 if dur.endswith("s") else None
         if active_min is None or active_min <= 0 or active_min > span_min * 1.2:
