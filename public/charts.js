@@ -379,20 +379,26 @@ const zoneIndex5 = (bpm, edges) => { for (let k = 0; k < 4; k++) { if (bpm < edg
  * is unaffected.
  */
 // Google's exerciseType enum runs to dozens of values; this covers the ones
-// likely to actually show up from a wrist-worn tracker's auto-detection, with
-// a generic fallback rather than trying to be exhaustive.
-const WORKOUT_ICON = {
-  WALKING: "\u{1F6B6}", HIKING: "\u{1FA7E}",
-  RUNNING: "\u{1F3C3}", JOGGING: "\u{1F3C3}", ELLIPTICAL: "\u{1F3C3}",
-  WEIGHTS: "\u{1F3CB}", STRENGTH_TRAINING: "\u{1F3CB}", WEIGHTLIFTING: "\u{1F3CB}",
-  CYCLING: "\u{1F6B4}", BIKING: "\u{1F6B4}",
-  SWIMMING: "\u{1F3CA}", ROWING: "\u{1F6A3}",
-  YOGA: "\u{1F9D8}", PILATES: "\u{1F9D8}",
-  HIIT: "\u{1F525}", CARDIO_WORKOUT: "\u{2764}\u{FE0F}",
-  BASKETBALL: "\u{1F3C0}", SOCCER: "\u{26BD}", TENNIS: "\u{1F3BE}", GOLF: "\u{26F3}",
-  DANCING: "\u{1F483}", CLIMBING: "\u{1F9D7}",
+// likely to actually show up from a wrist-worn tracker's auto-detection.
+// Short text, not an emoji glyph -- this app has no icon set anywhere else,
+// so a colored-and-weighted word reads as "this app's own UI" where an
+// emoji (rendered by the OS's own font, not this design) read as a sticker
+// dropped on top of it.
+const WORKOUT_LABEL = {
+  WALKING: "Walk", HIKING: "Hike",
+  RUNNING: "Run", JOGGING: "Jog", ELLIPTICAL: "Elliptical",
+  WEIGHTS: "Lift", STRENGTH_TRAINING: "Lift", WEIGHTLIFTING: "Lift",
+  CYCLING: "Bike", BIKING: "Bike",
+  SWIMMING: "Swim", ROWING: "Row",
+  YOGA: "Yoga", PILATES: "Yoga",
+  HIIT: "HIIT", CARDIO_WORKOUT: "Cardio",
+  BASKETBALL: "B-ball", SOCCER: "Soccer", TENNIS: "Tennis", GOLF: "Golf",
+  DANCING: "Dance", CLIMBING: "Climb",
 };
-const workoutIcon = (type) => WORKOUT_ICON[String(type || "").toUpperCase()] || "\u{26A1}";
+// Falls back to the type's own first word, title-cased, for anything
+// Google's enum throws at this that isn't in the map above.
+const workoutLabel = (type) => WORKOUT_LABEL[String(type || "").toUpperCase()]
+  || String(type || "Workout").toLowerCase().split("_")[0].replace(/^./, (c) => c.toUpperCase());
 
 // A night's own "start" clock time is filed under its WAKE date
 // (main_sleeps(), pulse/metrics.py), so bedtime is usually the evening
@@ -501,11 +507,16 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null,
       fill="none" stroke="${col("strain")}" stroke-width="1.5" stroke-linejoin="round"/>`;
   }
 
-  // Drawn on top of the line (not with the band rects above it), so the icon
-  // reads clearly regardless of what the HR trace is doing underneath it.
-  // pointer-events:none keeps it out of the way of the band's own tap target.
+  // Drawn on top of the line (not with the band rects above it), so the
+  // label reads clearly regardless of what the HR trace is doing underneath
+  // it. The stroke-as-halo (paint-order flips fill/stroke drawing order)
+  // does that without a background pill, which would need its own width
+  // math per label; pointer-events:none keeps it out of the way of the
+  // band's own tap target.
   woIcons.forEach(({ x, type }) => {
-    p += `<text x="${x.toFixed(1)}" y="${y0 + 18}" font-size="13" text-anchor="middle" pointer-events="none">${workoutIcon(type)}</text>`;
+    p += `<text x="${x.toFixed(1)}" y="${y0 + 15}" font-size="10" font-weight="700" font-family="${SANS}"
+      text-anchor="middle" fill="${col("text")}" stroke="${col("panel")}" stroke-width="3" paint-order="stroke"
+      pointer-events="none">${esc(workoutLabel(type))}</text>`;
   });
 
   // Drink markers are selected by WHERE THEY FALL, not by which drinking night
