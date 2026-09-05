@@ -168,7 +168,7 @@ addEventListener("click", (e) => {
 });
 // Bumped by hand whenever the scrubber changes. Compared against the commit
 // /api/config reports, so a stale cached bundle is visible instead of inferred.
-const BUILD = "steppers+pwadbg+bootline";
+const BUILD = "no-axis-release";
 let dbgBox = null;
 function dbg(line) {
   if (!DBG) return;
@@ -243,45 +243,64 @@ const CTX = matchMedia("(display-mode: standalone)").matches ||
             navigator.standalone ? "[PWA]" : "[tab]";
 
 function bindScrub(root) {
-  let drag = null, sx = 0, sy = 0, axis = null;
+  let drag = null, sx = 0, sy = 0, lx = 0, ly = 0;
   let nPointer = 0, nTouch = 0;          // per-gesture, reset on every start
+  let gesture = false;                   // did this touch start on a chart?
 
-  // Consume BOTH event streams instead of betting on one.
+  // Consume BOTH event streams instead of betting on one. scrubAt is
+  // idempotent, so being driven twice for one movement costs a redundant index
+  // lookup and nothing else.
   //
-  // The device has now shown pointermove and touchmove each failing to arrive
-  // on different charts -- the heart-rate chart got 46 touchmoves and no
-  // usable pointermoves, the 14-band charts got neither. Rather than keep
-  // guessing which stream iOS will honour for a given element, take whichever
-  // shows up; scrubAt is idempotent, so being driven twice for one movement
-  // costs a redundant index lookup and nothing else.
-  const CLAIM_X = 10;
-  const RELEASE_Y = 24;
-
+  // There is deliberately NO axis arbitration here any more, and that removal
+  // is the fix for the bug this file spent ten commits on.
+  //
+  // The old rule was: claim the gesture at 10px of horizontal travel, but if
+  // 24px of VERTICAL travel comes first, release the drag so the page can
+  // scroll. Sound rule -- until 4528578 set touch-action:none on the charts,
+  // which made scrolling from a chart impossible. From that commit on, the
+  // release had nothing left to release TO. It could only destroy drags.
+  //
+  // And it destroyed nearly all of them, because a thumb pivots. The device
+  // log for a deliberate sideways drag reads dx=1 dy=30 over its first four
+  // samples: the finger rolls down as it lands, crosses the vertical
+  // threshold before the horizontal one, and the drag is cancelled ~40ms in.
+  // Everything after that is ignored, which is precisely "it shows one value
+  // and then freezes".
+  //
+  // Two fixes that were each correct on their own arrived in the wrong order
+  // and became a bug. Nothing about iOS was ever broken.
   const begin = (svgEl, x, y) => {
-    drag = svgEl; sx = x; sy = y; axis = null;
+    drag = svgEl; sx = lx = x; sy = ly = y; gesture = true;
     nPointer = 0; nTouch = 0;            // reset HERE, not at the end -- the
     scrubAt(svgEl, x);                   // previous version counted the moves
   };                                     // of the gesture before this one
 
   const move = (x, y) => {
     if (!drag) return;
-    const dx = Math.abs(x - sx), dy = Math.abs(y - sy);
-    if (!axis) {
-      if (dx >= CLAIM_X) { axis = "x"; dbg(`axis=x (dx=${dx | 0} dy=${dy | 0})`); }
-      else if (dy >= RELEASE_Y) { dbg(`axis=y, releasing (dx=${dx | 0} dy=${dy | 0})`); drag = null; return; }
-    }
+    lx = x; ly = y;
     scrubAt(drag, x);
   };
 
+  // Logs EVERY gesture that started on a chart, not just the ones that still
+  // held a drag at the end. The old guard was `if (drag)`, and the axis
+  // release above set drag to null -- so the only gestures that could ever
+  // reach this line were the ones with no movement in them. "pointermoves=0"
+  // was a tautology printed by taps, and it is what sent eight fixes hunting
+  // for a platform that was never withholding anything.
   const end = (why) => {
-    if (drag) dbg(`${why}: pointermoves=${nPointer} touchmoves=${nTouch} axis=${axis} ${CTX}`);
-    drag = null; axis = null;
+    if (gesture) {
+      dbg(`${why}: moves p=${nPointer} t=${nTouch} ` +
+          `travel dx=${(lx - sx) | 0} dy=${(ly - sy) | 0} ${CTX}`);
+    }
+    gesture = false; drag = null;
   };
 
   root.addEventListener("pointerdown", (e) => {
     const s = e.target.closest?.("svg[data-scrub]");
-    dbg(`pointerdown(${e.pointerType}) -> ${s ? s.dataset.scrub + ", " + s.querySelectorAll("rect[data-i]").length + " bands" : "no chart"}`);
-    if (s) begin(s, e.clientX, e.clientY);
+    if (!s) return;                       // touches that miss a chart are not
+    dbg(`pointerdown(${e.pointerType}) -> ` +   // interesting: hit-testing was
+        `${s.dataset.scrub}, ${s.querySelectorAll("rect[data-i]").length} bands`);
+    begin(s, e.clientX, e.clientY);       // measured correct at 9 points/chart
   });
 
   addEventListener("pointermove", (e) => {
