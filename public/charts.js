@@ -341,23 +341,23 @@ function bucket(pts, size = BUCKET_MIN) {
   return out;
 }
 
-// A second heart-rate palette, used only when a chart opts into `zoned:
-// true` below -- four bands (Light/Moderate/Vigorous/Peak) instead of the
-// five Z1-Z5 Karvonen bands every other chart draws, colored to match the
-// same words the workout detail's zone bars use. Reuses colors already
-// meaningful elsewhere (light = sleep's LIGHT stage, good/awake/warn =
-// recovery's own good/moderate/bad) rather than inventing a fourth palette.
+// The workout detail's "Time in each zone" bars (app.js's zoneBars) use
+// Fitbit's own light/moderate/vigorous/peak split and are colored to match
+// -- reusing colors already meaningful elsewhere (light = sleep's LIGHT
+// stage, good/awake/warn = recovery's own good/moderate/bad) rather than
+// inventing a fourth palette just for this.
 export const WZONE = [col("light"), col("good"), col("awake"), col("warn")];
 
-// Karvonen edges collapsed to 4 bands instead of 5: Light absorbs what would
-// have been Z1+Z2 (below 70% HRR), Moderate/Vigorous/Peak split the rest the
-// same way zone_bounds() does server-side (metrics.py). Not Fitbit's own
-// (undisclosed, personalized-to-fitness-and-age) thresholds -- this project
-// has no access to those -- but the same %HRR technique the rest of the app
-// already uses for zones, just regrouped to match the 4 names Fitbit's own
-// per-workout zone durations use.
-const zoneEdges4 = (rhr, hrmax) => { const res = hrmax - rhr; return [0, rhr + res * 0.7, rhr + res * 0.8, rhr + res * 0.9, hrmax]; };
-const zoneIndex4 = (bpm, edges) => { for (let k = 0; k < 3; k++) { if (bpm < edges[k + 1]) return k; } return 3; };
+// The workout HR CHART is a separate coloring from those bars: an intensity
+// gradient across the same 5 Karvonen bands zone_min already uses everywhere
+// else in the app (day_strain() in metrics.py) -- green at the low end, red
+// at the top, so "how hard was this moment" reads at a glance the way a
+// heart-rate-zone chart conventionally does. Deliberately not tied to
+// WZONE's 4 named bands above: this is a numbered Z1-Z5 gradient, not a
+// recoloring of Fitbit's classification.
+const HR_GRADIENT = ["#3FD68A", "#A3D639", "#F2CB3B", "#F2A93B", "#F2545B"];
+const zoneEdges5 = (rhr, hrmax) => { const res = hrmax - rhr; return [0, 0.6, 0.7, 0.8, 0.9, 1].map((f) => rhr + res * f); };
+const zoneIndex5 = (bpm, edges) => { for (let k = 0; k < 4; k++) { if (bpm < edges[k + 1]) return k; } return 4; };
 
 /**
  * One civil day of heart rate, with Karvonen zone bands and drink markers.
@@ -372,12 +372,11 @@ const zoneIndex4 = (bpm, edges) => { for (let k = 0; k < 3; k++) { if (bpm < edg
  * Takes an options bag rather than (D, t) because it is drawn for whichever
  * day the stepper is on, not only for the newest row.
  *
- * `zoned` swaps the single-color line and the 5-band Z1-Z5 background for the
- * 4-band Light/Moderate/Vigorous/Peak scheme above, with the line itself
- * colored per-segment by zone -- used only by the workout detail, where a
- * bar-per-zone breakdown sits right below it and the two should speak the
- * same color language. Every other caller (the Day tab, heart rate during
- * sleep) is unaffected.
+ * `zoned` swaps the single-color line and the usual muted Z1-Z5 background
+ * for the green-to-red HR_GRADIENT above, with the line itself colored
+ * per-segment by zone rather than drawn as one polyline -- used only by the
+ * workout detail. Every other caller (the Day tab, heart rate during sleep)
+ * is unaffected.
  */
 export function hrIntraday(W, { curve, drinks = [], hrmax, rhr, zoned = false }) {
   const h = 232, x0 = padL(W), x1 = W - padR(W), y0 = 36, y1 = 186, yAxis = 208;
@@ -399,21 +398,18 @@ export function hrIntraday(W, { curve, drinks = [], hrmax, rhr, zoned = false })
   const Y = (v) => y1 - ((v - lo) / ((hi - lo) || 1)) * (y1 - y0);
 
   let p = "";
-  const edges4 = zoned && ok(hrmax) && ok(rhr) ? zoneEdges4(rhr, hrmax) : null;
-  if (edges4) {
-    for (let i = 0; i < 4; i++) {
-      const yT = Y(Math.min(edges4[i + 1], hi)), yB = Y(Math.max(edges4[i], lo));
-      if (yB > yT) p += `<rect x="${x0}" y="${yT.toFixed(1)}" width="${x1 - x0}" height="${(yB - yT).toFixed(1)}" fill="${WZONE[i]}" opacity=".16"/>`;
-    }
-  } else if (ok(hrmax) && ok(rhr)) {
-    const res = hrmax - rhr, edges = [0, 0.6, 0.7, 0.8, 0.9, 1].map((f) => rhr + res * f);
+  // Same 5-band edges either way -- zoned only changes which palette paints
+  // them and whether the line itself is one of the two below.
+  const edges = ok(hrmax) && ok(rhr) ? zoneEdges5(rhr, hrmax) : null;
+  if (edges) {
+    const palette = zoned ? HR_GRADIENT : ZONE;
     for (let i = 0; i < 5; i++) {
       const yT = Y(Math.min(edges[i + 1], hi)), yB = Y(Math.max(edges[i], lo));
-      if (yB > yT) p += `<rect x="${x0}" y="${yT.toFixed(1)}" width="${x1 - x0}" height="${(yB - yT).toFixed(1)}" fill="${ZONE[i]}" opacity=".16"/>`;
+      if (yB > yT) p += `<rect x="${x0}" y="${yT.toFixed(1)}" width="${x1 - x0}" height="${(yB - yT).toFixed(1)}" fill="${palette[i]}" opacity=".16"/>`;
     }
   }
   p += grid(x0, x1, [y0, (y0 + y1) / 2, y1]);
-  if (edges4) {
+  if (zoned && edges) {
     // One short segment per consecutive pair rather than one polyline: SVG
     // has no per-vertex stroke color, so a line whose color tracks the zone
     // it's passing through has to be built out of many single-color pieces.
@@ -421,9 +417,9 @@ export function hrIntraday(W, { curve, drinks = [], hrmax, rhr, zoned = false })
     // threshold -- consistent regardless of which endpoint you'd otherwise
     // have picked.
     for (let i = 0; i < pts.length - 1; i++) {
-      const zi = zoneIndex4((pts[i][1] + pts[i + 1][1]) / 2, edges4);
+      const zi = zoneIndex5((pts[i][1] + pts[i + 1][1]) / 2, edges);
       p += `<line x1="${X(t[i]).toFixed(1)}" y1="${Y(pts[i][1]).toFixed(1)}" x2="${X(t[i + 1]).toFixed(1)}" y2="${Y(pts[i + 1][1]).toFixed(1)}"
-        stroke="${WZONE[zi]}" stroke-width="1.75" stroke-linecap="round"/>`;
+        stroke="${HR_GRADIENT[zi]}" stroke-width="1.75" stroke-linecap="round"/>`;
     }
   } else {
     p += `<polyline points="${pts.map((q, i) => `${X(t[i]).toFixed(1)},${Y(q[1]).toFixed(1)}`).join(" ")}"
