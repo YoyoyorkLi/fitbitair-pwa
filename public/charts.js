@@ -378,7 +378,38 @@ const zoneIndex5 = (bpm, edges) => { for (let k = 0; k < 4; k++) { if (bpm < edg
  * workout detail. Every other caller (the Day tab, heart rate during sleep)
  * is unaffected.
  */
-export function hrIntraday(W, { curve, drinks = [], workouts = [], hrmax, rhr, zoned = false }) {
+// Google's exerciseType enum runs to dozens of values; this covers the ones
+// likely to actually show up from a wrist-worn tracker's auto-detection, with
+// a generic fallback rather than trying to be exhaustive.
+const WORKOUT_ICON = {
+  WALKING: "\u{1F6B6}", HIKING: "\u{1FA7E}",
+  RUNNING: "\u{1F3C3}", JOGGING: "\u{1F3C3}", ELLIPTICAL: "\u{1F3C3}",
+  WEIGHTS: "\u{1F3CB}", STRENGTH_TRAINING: "\u{1F3CB}", WEIGHTLIFTING: "\u{1F3CB}",
+  CYCLING: "\u{1F6B4}", BIKING: "\u{1F6B4}",
+  SWIMMING: "\u{1F3CA}", ROWING: "\u{1F6A3}",
+  YOGA: "\u{1F9D8}", PILATES: "\u{1F9D8}",
+  HIIT: "\u{1F525}", CARDIO_WORKOUT: "\u{2764}\u{FE0F}",
+  BASKETBALL: "\u{1F3C0}", SOCCER: "\u{26BD}", TENNIS: "\u{1F3BE}", GOLF: "\u{26F3}",
+  DANCING: "\u{1F483}", CLIMBING: "\u{1F9D7}",
+};
+const workoutIcon = (type) => WORKOUT_ICON[String(type || "").toUpperCase()] || "\u{26A1}";
+
+// A night's own "start" clock time is filed under its WAKE date
+// (main_sleeps(), pulse/metrics.py), so bedtime is usually the evening
+// BEFORE this chart's own day -- unlike a workout's start, it cannot just be
+// rolled forward from tLo the way unroll() does. But the WAKE moment is
+// reliably "on this chart's day", exactly like a workout's start is, so it
+// rolls forward the same way; bedtime then falls straight out as wake minus
+// how long the session ran, in that same frame. No guessing which calendar
+// day the bedtime clock reading belongs to.
+function nightSpan(start, minutes, tLo) {
+  const wake = (mins(start) + minutes) % 1440;
+  let e = wake;
+  while (e < tLo) e += 1440;
+  return [e - minutes, e];
+}
+
+export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null, hrmax, rhr, zoned = false }) {
   const h = 232, x0 = padL(W), x1 = W - padR(W), y0 = 36, y1 = 186, yAxis = 208;
   // A night's row has no curve until that sleep session has ended and synced --
   // push.py only computes hr_curve once sleep_start/sleep_end exist. That is
@@ -418,12 +449,29 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], hrmax, rhr, z
   // drink markers further down, so declared once rather than twice.
   const tLo = t[0], tHi = t[t.length - 1];
 
+  // Sleep overlay: same idea as the workout band below, but the night is one
+  // object, not a list, and uses nightSpan() rather than unroll() since a
+  // late bedtime needs to land BEFORE this chart's start, not rolled forward
+  // past it the way a same-day workout time does.
+  if (sleep) {
+    const [s, e] = nightSpan(sleep.start, Number(sleep.min) || 0, tLo);
+    if (!(e < tLo || s > tHi)) {
+      const xs = X(Math.max(s, tLo)), xe = X(Math.min(e, tHi));
+      p += `<rect x="${xs.toFixed(1)}" y="${y0}" width="${Math.max(xe - xs, 1.5).toFixed(1)}" height="${y1 - y0}"
+        fill="${col("rem")}" opacity=".18" data-tip="${esc(`Asleep|${clock12(s)}–${clock12(e)}`)}"/>`;
+    }
+  }
+
   // Workout overlay: a translucent full-height band over each session's own
   // clock span, off by default (see the toggle in app.js's renderDay). Reuses
   // unroll() so a workout starting late and crossing the chart's own midnight
   // wrap lands at the same continuous-minute position the curve itself does;
   // clipping to [tLo, tHi] lets a session that runs past this chart's own
   // window just end at its edge instead of needing next-day data it doesn't have.
+  // Icons are collected here but drawn later, on top of the HR line (see
+  // below) rather than under it, so the type reads at a glance without
+  // needing to tap -- "without crowding the UI" ruled out a text label.
+  const woIcons = [];
   workouts.forEach((w) => {
     const s = unroll([w.start], tLo)[0];
     const e = s + (Number(w.min) || 0);
@@ -432,6 +480,7 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], hrmax, rhr, z
     const label = String(w.type || "Workout").toLowerCase().replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
     p += `<rect x="${xs.toFixed(1)}" y="${y0}" width="${Math.max(xe - xs, 1.5).toFixed(1)}" height="${y1 - y0}"
       fill="${col("workout")}" opacity=".2" data-tip="${esc(`${label}|${clock12(s)}–${clock12(e)}`)}"/>`;
+    woIcons.push({ x: (xs + xe) / 2, type: w.type });
   });
 
   p += grid(x0, x1, [y0, (y0 + y1) / 2, y1]);
@@ -451,6 +500,13 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], hrmax, rhr, z
     p += `<polyline points="${pts.map((q, i) => `${X(t[i]).toFixed(1)},${Y(q[1]).toFixed(1)}`).join(" ")}"
       fill="none" stroke="${col("strain")}" stroke-width="1.5" stroke-linejoin="round"/>`;
   }
+
+  // Drawn on top of the line (not with the band rects above it), so the icon
+  // reads clearly regardless of what the HR trace is doing underneath it.
+  // pointer-events:none keeps it out of the way of the band's own tap target.
+  woIcons.forEach(({ x, type }) => {
+    p += `<text x="${x.toFixed(1)}" y="${y0 + 18}" font-size="13" text-anchor="middle" pointer-events="none">${workoutIcon(type)}</text>`;
+  });
 
   // Drink markers are selected by WHERE THEY FALL, not by which drinking night
   // they belong to. A session runs 9pm to 1am and a civil day cuts it at
@@ -521,7 +577,11 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], hrmax, rhr, z
     p += txt(X(m), yAxis, short ? clock12(m) : tick12(m), { size: 9.5, anchor });
   });
   p += scrubLayer(y0, y1);
-  return svg(W, h, p, `Heart rate across the night with zone bands, drink markers${workouts.length ? " and workout times" : ""}`, "time");
+  const descParts = ["zone bands", "drink markers", sleep && "sleep window", workouts.length && "workout times"].filter(Boolean);
+  const desc = descParts.length > 1
+    ? `${descParts.slice(0, -1).join(", ")} and ${descParts[descParts.length - 1]}`
+    : descParts[0];
+  return svg(W, h, p, `Heart rate across the night with ${desc}`, "time");
 }
 
 // -------------------------------------------------------------------- bars

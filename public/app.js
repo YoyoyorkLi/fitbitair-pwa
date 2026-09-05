@@ -927,6 +927,11 @@ let showWorkouts = (() => { try { return localStorage.getItem(WO_KEY) === "1"; }
 const DR_KEY = "pulse-hr-drinks";
 let showDrinks = (() => { try { return localStorage.getItem(DR_KEY) !== "0"; } catch { return true; } })();
 
+// Off by default, same reasoning as workouts: brand new overlay, so the
+// existing chart should not change shape for anyone who hasn't asked for it.
+const SL_KEY = "pulse-hr-sleep";
+let showSleep = (() => { try { return localStorage.getItem(SL_KEY) === "1"; } catch { return false; } })();
+
 function renderDay() {
   const D = DATA, i = dayIdx, t = viewFor(D, i);
   const latest = i === D.dates.length - 1;
@@ -967,10 +972,15 @@ function renderDay() {
       totals and keep climbing until midnight.</p>` : ""}</div>
     ${card(`Heart rate<span class="card-toggles">
         <button type="button" class="chip-toggle${showDrinks ? " on" : ""}" data-dr-toggle aria-pressed="${showDrinks}"><span class="dot"></span>Drinks</button>
+        <button type="button" class="chip-toggle${showSleep ? " on" : ""}" data-sl-toggle aria-pressed="${showSleep}"><span class="dot"></span>Sleep</button>
         <button type="button" class="chip-toggle${showWorkouts ? " on" : ""}" data-wo-toggle aria-pressed="${showWorkouts}"><span class="dot"></span>Workouts</button>
       </span>`, ch.hrIntraday(W, {
         curve: D.curves[i], drinks: showDrinks ? D.drinkTimes[i] : [], hrmax: D.hrmax, rhr: t.rhr,
         workouts: showWorkouts ? (D.workouts[i] || []) : [],
+        // D.hypnos[i] is keyed by WAKE date -- this night mostly ran the
+        // evening before, so its "start" clock time typically needs to read
+        // as yesterday relative to this chart. See nightSpan() in charts.js.
+        sleep: showSleep && D.hypnos[i] ? { start: D.hypnos[i].start, min: D.hypnos[i].span } : null,
       }))}
     ${card(`Steps — ${stepsDays} days`, ch.bars(W, D, D.steps, stepsDays, col("steps"), kfmt, "steps"))}
     ${card(`Strain vs target — ${strainDays} days`, ch.strainHistory(W, D, strainDays))}`;
@@ -1036,6 +1046,11 @@ $("dash").addEventListener("click", (e) => {
   if (e.target.closest?.("[data-dr-toggle]")) {
     showDrinks = !showDrinks;
     try { localStorage.setItem(DR_KEY, showDrinks ? "1" : "0"); } catch { /* private mode */ }
+    return renderDay();
+  }
+  if (e.target.closest?.("[data-sl-toggle]")) {
+    showSleep = !showSleep;
+    try { localStorage.setItem(SL_KEY, showSleep ? "1" : "0"); } catch { /* private mode */ }
     return renderDay();
   }
   const b = e.target.closest?.(".kpi[data-detail]");

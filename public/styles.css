@@ -83,12 +83,17 @@ a{color:var(--accent)}
 .pips{display:flex;gap:4px}
 .pips i{width:7px;height:18px;border-radius:2px;background:var(--drink);display:block}
 
-.card{background:var(--panel);border:1px solid var(--grid);border-radius:6px;padding:18px;margin-bottom:14px;position:relative}
-.card h2{font-size:11.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);margin:0 0 14px;font-weight:600}
-/* Sits inside the card's own padding box (.card is the positioned ancestor),
-   so it works wherever the ${ttl} string that grows the <h2> puts it in the
-   markup -- it does not need its own wrapper element. */
-.card-toggles{position:absolute;top:13px;right:14px;display:flex;gap:8px}
+.card{background:var(--panel);border:1px solid var(--grid);border-radius:6px;padding:18px;margin-bottom:14px}
+/* Flex, not the toggles floating in an absolutely-positioned corner: an
+   absolute chip has no height as far as the box below it (.readrow, with
+   the scrub stepper) is concerned, so the two silently overlapped whenever
+   the title's own single-line box was shorter than the chip row. Flex makes
+   the header's real height include the chips, so .readrow always starts
+   below them, and wrapping (narrow phone, 3 chips) pushes down instead of
+   clipping. */
+.card h2{font-size:11.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);margin:0 0 14px;font-weight:600;
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px 8px}
+.card-toggles{display:flex;flex-wrap:wrap;gap:8px}
 .chip-toggle{display:inline-flex;align-items:center;gap:6px;
   background:var(--panel2);border:1px solid var(--grid);border-radius:20px;padding:8px 12px;
   font-size:11px;font-weight:600;letter-spacing:.02em;color:var(--muted);text-transform:none;
@@ -99,6 +104,8 @@ a{color:var(--accent)}
 .chip-toggle[data-wo-toggle].on .dot{background:var(--workout)}
 .chip-toggle[data-dr-toggle].on{border-color:var(--drink)}
 .chip-toggle[data-dr-toggle].on .dot{background:var(--drink)}
+.chip-toggle[data-sl-toggle].on{border-color:var(--rem)}
+.chip-toggle[data-sl-toggle].on .dot{background:var(--rem)}
 .note{color:var(--muted);font-size:13px;margin:12px 0 0;line-height:1.5}
 .note b{color:var(--text);font-weight:500}
 /* Charts are authored at the measured pixel width of this box (charts.js takes
