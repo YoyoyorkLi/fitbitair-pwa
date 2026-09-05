@@ -920,6 +920,13 @@ setInterval(() => {
 const WO_KEY = "pulse-hr-workouts";
 let showWorkouts = (() => { try { return localStorage.getItem(WO_KEY) === "1"; } catch { return false; } })();
 
+// On by default, unlike the workout toggle above: drink markers are a
+// long-standing, always-shown part of this chart, so hiding them without
+// being asked would be a regression, not a quiet default. Stored only once
+// someone actually flips it, so "unset" still reads as on.
+const DR_KEY = "pulse-hr-drinks";
+let showDrinks = (() => { try { return localStorage.getItem(DR_KEY) !== "0"; } catch { return true; } })();
+
 function renderDay() {
   const D = DATA, i = dayIdx, t = viewFor(D, i);
   const latest = i === D.dates.length - 1;
@@ -958,8 +965,11 @@ function renderDay() {
       ${stat(ok(t.steps) ? t.steps.toLocaleString() : "—", "Steps", col("steps"))}${stat(ok(t.debt) ? hm(t.debt) : "—", "Sleep debt")}
     </div>${latest ? `<p class="note">Today is still in progress — strain and steps are running
       totals and keep climbing until midnight.</p>` : ""}</div>
-    ${card(`Heart rate<button type="button" class="wo-toggle${showWorkouts ? " on" : ""}" data-wo-toggle aria-pressed="${showWorkouts}"><span class="dot"></span>Workouts</button>`, ch.hrIntraday(W, {
-        curve: D.curves[i], drinks: D.drinkTimes[i], hrmax: D.hrmax, rhr: t.rhr,
+    ${card(`Heart rate<span class="card-toggles">
+        <button type="button" class="chip-toggle${showDrinks ? " on" : ""}" data-dr-toggle aria-pressed="${showDrinks}"><span class="dot"></span>Drinks</button>
+        <button type="button" class="chip-toggle${showWorkouts ? " on" : ""}" data-wo-toggle aria-pressed="${showWorkouts}"><span class="dot"></span>Workouts</button>
+      </span>`, ch.hrIntraday(W, {
+        curve: D.curves[i], drinks: showDrinks ? D.drinkTimes[i] : [], hrmax: D.hrmax, rhr: t.rhr,
         workouts: showWorkouts ? (D.workouts[i] || []) : [],
       }))}
     ${card(`Steps — ${stepsDays} days`, ch.bars(W, D, D.steps, stepsDays, col("steps"), kfmt, "steps"))}
@@ -1021,6 +1031,11 @@ $("dash").addEventListener("click", (e) => {
   if (e.target.closest?.("[data-wo-toggle]")) {
     showWorkouts = !showWorkouts;
     try { localStorage.setItem(WO_KEY, showWorkouts ? "1" : "0"); } catch { /* private mode */ }
+    return renderDay();
+  }
+  if (e.target.closest?.("[data-dr-toggle]")) {
+    showDrinks = !showDrinks;
+    try { localStorage.setItem(DR_KEY, showDrinks ? "1" : "0"); } catch { /* private mode */ }
     return renderDay();
   }
   const b = e.target.closest?.(".kpi[data-detail]");

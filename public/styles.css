@@ -88,13 +88,17 @@ a{color:var(--accent)}
 /* Sits inside the card's own padding box (.card is the positioned ancestor),
    so it works wherever the ${ttl} string that grows the <h2> puts it in the
    markup -- it does not need its own wrapper element. */
-.wo-toggle{position:absolute;top:13px;right:14px;display:inline-flex;align-items:center;gap:6px;
+.card-toggles{position:absolute;top:13px;right:14px;display:flex;gap:8px}
+.chip-toggle{display:inline-flex;align-items:center;gap:6px;
   background:var(--panel2);border:1px solid var(--grid);border-radius:20px;padding:8px 12px;
   font-size:11px;font-weight:600;letter-spacing:.02em;color:var(--muted);text-transform:none;
   cursor:pointer;-webkit-tap-highlight-color:transparent}
-.wo-toggle .dot{width:8px;height:8px;border-radius:50%;background:var(--grid);flex:none}
-.wo-toggle.on{color:var(--text);border-color:var(--workout)}
-.wo-toggle.on .dot{background:var(--workout)}
+.chip-toggle .dot{width:8px;height:8px;border-radius:50%;background:var(--grid);flex:none}
+.chip-toggle.on{color:var(--text)}
+.chip-toggle[data-wo-toggle].on{border-color:var(--workout)}
+.chip-toggle[data-wo-toggle].on .dot{background:var(--workout)}
+.chip-toggle[data-dr-toggle].on{border-color:var(--drink)}
+.chip-toggle[data-dr-toggle].on .dot{background:var(--drink)}
 .note{color:var(--muted);font-size:13px;margin:12px 0 0;line-height:1.5}
 .note b{color:var(--text);font-weight:500}
 /* Charts are authored at the measured pixel width of this box (charts.js takes
