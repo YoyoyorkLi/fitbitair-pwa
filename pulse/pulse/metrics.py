@@ -1,9 +1,14 @@
 """Derived metrics: strain, recovery, sleep score, consistency.
 
 Everything is transparent and tunable. Where a vendor formula is proprietary
-(Bevel strain, Google sleep score) we reimplement from the published
-description rather than guessing constants, so numbers track theirs
-directionally but will not match digit for digit.
+(Bevel strain) we reimplement from the published description rather than
+guessing constants, so numbers track theirs directionally but will not match
+digit for digit. Sleep score is not an attempt to reproduce Google's specific
+(undisclosed) formula -- it is our own composite over the contributors Oura,
+WHOOP and sleep-medicine literature converge on: duration against personal
+need, efficiency, REM%/deep% against the ranges research treats as healthy,
+latency, restlessness/interruptions/awakenings, and bed/wake-time
+consistency. It will disagree with any single vendor's number by design.
 
 Parsing is deliberately defensive: the v4 schema is pre-GA and still moving,
 so a renamed field should degrade to "still works" rather than "KeyError,
@@ -406,14 +411,37 @@ def day_strain(hr_df, rhr, hrmax):
 
 
 # ------------------------------------------------------------ sleep score
-def sleep_score(night, need_min):
-    """Reimplementation of Google's April-2026 six-metric Sleep Score.
+TIMING_HISTORY = 14   # nights of rolling bed/wake-time baseline for "Sleep timing"
 
-    Duration carries the majority of the weight; the other five describe how
-    the night actually went. Returns (score, per-metric breakdown).
+
+def _tod_since_6pm(dt):
+    """Minutes since the most recent 6pm.
+
+    A plain clock-time average of bed/wake times wraps at midnight -- an
+    11pm and a 1am bedtime would average to noon. Anchoring the day at 6pm
+    (well before anyone's bedtime and after anyone's wake time) puts a
+    normal night on one continuous, averageable axis instead.
+    """
+    anchor = dt.replace(hour=18, minute=0, second=0, microsecond=0)
+    if dt < anchor:
+        anchor -= pd.Timedelta(days=1)
+    return (dt - anchor).total_seconds() / 60
+
+
+def sleep_score(night, need_min, timing_dev=None):
+    """Composite sleep score over the contributors that keep showing up
+    across Oura, WHOOP and sleep-medicine literature -- see the module
+    docstring. Nine weighted metrics; returns (score, per-metric breakdown).
+
+    The restlessness/interruptions/full-awakenings bands are our own
+    calibration (no single published threshold exists for them); duration,
+    efficiency, REM%, deep% and latency are banded against ranges sleep
+    research treats as healthy, so this will not hand out 100 as easily as
+    a curve tuned to be flattering.
     """
     st = night["stages"]
     asleep = max(float(night["asleep"]), 1.0)
+    in_bed = max(float(night["in_bed"]), asleep)
     need_min = max(float(need_min), 1.0)
     t0 = night["start"]
 
@@ -428,18 +456,45 @@ def sleep_score(night, need_min):
     restless = sum(s["mins"] for s in wakes if s["mins"] < 5)
     interruptions = sum(s["mins"] for s in wakes if s["mins"] >= 5)
     full_wakes = sum(1 for s in wakes if s["mins"] >= 5)
-    sound = max(0.0, asleep - restless)
+
+    rem_pct = 100 * night["stage_min"].get("REM", 0) / asleep
+    deep_pct = 100 * night["stage_min"].get("DEEP", 0) / asleep
+    efficiency = asleep / in_bed
 
     def band(x, best, worst):
         return float(np.clip((worst - x) / (worst - best), 0, 1))
 
+    def in_range(x, low, target_lo, target_hi, high):
+        """Full credit inside [target_lo, target_hi], tapering linearly to 0
+        by low/high -- for metrics with a healthy *range* (REM%, deep%)
+        rather than a monotonic best/worst."""
+        if x < low or x > high:
+            return 0.0
+        if x < target_lo:
+            return (x - low) / (target_lo - low)
+        if x > target_hi:
+            return (high - x) / (high - target_hi)
+        return 1.0
+
     parts = {
-        "Duration":        (50, min(1.0, asleep / need_min) ** 1.9),
-        "Time to sound":   (10, band(tss, 12, 45)),
-        "Sound sleep":     (15, float(np.clip(sound / asleep, 0, 1)) ** 3.0),
-        "Restlessness":    (10, band(restless, 4, 42)),
-        "Interruptions":   (10, band(interruptions, 3, 45)),
-        "Full awakenings": (5, band(full_wakes, 0, 4)),
+        # Duration ^2.4 (was ^1.9): a night 10% short of need now costs a
+        # visibly bigger bite instead of coasting near full credit.
+        "Duration":        (35, min(1.0, asleep / need_min) ** 2.4),
+        # Sleep-efficiency research: >=80% is "normal", >=90% is what most
+        # healthy young adults post -- so 95% is the ceiling, not just "any
+        # majority of the night asleep".
+        "Efficiency":      (15, band(efficiency, 0.95, 0.75)),
+        # Healthy REM is commonly cited as ~20-25% of total sleep.
+        "REM sleep":       (10, in_range(rem_pct, 5, 18, 28, 45)),
+        # Healthy deep sleep is commonly cited as ~10-20%, aim ~20%.
+        "Deep sleep":      (10, in_range(deep_pct, 3, 13, 23, 35)),
+        # Normal sleep latency is ~10-20min; >30min reads as prolonged.
+        "Time to sleep":   (10, band(tss, 10, 30)),
+        "Restlessness":    (5, band(restless, 2, 25)),
+        "Interruptions":   (5, band(interruptions, 0, 30)),
+        "Full awakenings": (5, band(full_wakes, 0, 3)),
+        # No baseline yet (first ~3 nights) -> neutral, not penalized.
+        "Sleep timing":    (5, 1.0 if timing_dev is None else band(timing_dev, 20, 90)),
     }
     breakdown = {k: (w, round(w * v, 1)) for k, (w, v) in parts.items()}
     total = int(round(sum(v for _, v in breakdown.values())))
@@ -453,12 +508,22 @@ def sleep_series(nights, strain_map, decay=0.88):
     reinforce each other and the number pins to its ceiling within a fortnight.
     """
     rows, debt = [], 0.0
+    bed_hist, wake_hist = [], []
     for n in nights:
         d = n["end"].normalize()
         prev = strain_map.get(d - pd.Timedelta(days=1), 0.0)
         core = cfg.SLEEP_NEED_BASE_MIN + min(60.0, 6.0 * max(0.0, prev - 10))
         need = core + min(90.0, 0.40 * debt)       # tonight's displayed target
-        score, parts = sleep_score(n, core)
+
+        bed_tod, wake_tod = _tod_since_6pm(n["start"]), _tod_since_6pm(n["end"])
+        timing_dev = None
+        if len(bed_hist) >= 3:
+            timing_dev = (abs(bed_tod - float(np.mean(bed_hist))) +
+                          abs(wake_tod - float(np.mean(wake_hist)))) / 2
+        bed_hist = (bed_hist + [bed_tod])[-TIMING_HISTORY:]
+        wake_hist = (wake_hist + [wake_tod])[-TIMING_HISTORY:]
+
+        score, parts = sleep_score(n, core, timing_dev)
         perf = min(1.0, n["asleep"] / max(need, 1.0))
         # 12%/night natural repayment: debt is not a ledger carried forever
         debt = float(np.clip(decay * debt + (core - n["asleep"]), 0, 600))
