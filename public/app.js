@@ -1009,7 +1009,7 @@ function renderWorkoutDayBody() {
   const workouts = D.workouts[i] || [];
   $("workout-day-title").textContent = ch.dlabel(D.dates[i]);
   $("workout-day-body").innerHTML = workouts.length
-    ? workouts.map((w) => workoutCard(D, i, w)).join("")
+    ? workouts.map((w, idx) => workoutCard(D, i, w, idx)).join("")
     : `<p class="note">No workouts recorded for this day.</p>`;
 }
 
@@ -1022,6 +1022,15 @@ $("dash").addEventListener("click", (e) => {
   if (cell) return openWorkoutDay(Number(cell.dataset.dayIdx));
   if (e.target.closest?.("#cal-prev")) return stepCalMonth(-1);
   if (e.target.closest?.("#cal-next")) return stepCalMonth(1);
+  const wt = e.target.closest?.(".wsummary[data-wtoggle]");
+  if (wt) {
+    const body = $(`wexpand-${wt.dataset.wtoggle}`);
+    const opening = body.hidden;
+    body.hidden = !opening;
+    wt.setAttribute("aria-expanded", String(opening));
+    wt.querySelector(".wchev").textContent = opening ? "⌄" : "›";
+    if (opening) primeReadouts(body);
+  }
 });
 $("detail-close").addEventListener("click", closeDetail);
 $("workout-day-close").addEventListener("click", closeWorkoutDay);
@@ -1061,7 +1070,7 @@ const titleCase = (s) => String(s).toLowerCase().replace(/_/g, " ").replace(/^./
 // index.html for why it's the whole day rather than just this row.
 const workoutRow = (w, dayIdx) => `<button type="button" class="workrow" data-workout-day="${dayIdx}">
     <div><span class="wtype">${titleCase(w.type)}</span><span class="wtime"> · ${ch.clock12(ch.mins(w.start))} · ${w.min}m</span></div>
-    <div class="wmetrics">${[w.cal != null ? `${w.cal} cal` : "", w.avg_hr != null ? `${w.avg_hr} bpm avg` : ""].filter(Boolean).join(" · ")}</div>
+    <div class="wmetrics">${w.cal != null ? `${w.cal} cal` : ""}</div>
   </button>`;
 
 // From a workout's own start clock + duration (already clamped to <=6h, see
@@ -1083,10 +1092,30 @@ function workoutHrCurve(D, i, w) {
   return merged.length ? merged : null;
 }
 
-const workoutCard = (D, i, w) => card(
-  `${titleCase(w.type)} · ${ch.clock12(ch.mins(w.start))} · ${w.min}m`,
-  ch.hrIntraday(W, { curve: workoutHrCurve(D, i, w), hrmax: D.hrmax, rhr: D.rhr[i] }),
-  [w.cal != null ? `${w.cal} cal` : "", w.avg_hr != null ? `${w.avg_hr} bpm avg` : ""].filter(Boolean).join(" · "));
+// Collapsed to time/duration/calories -- what you'd want at a glance for
+// every workout that day. Heart rate (the chart, the zone breakdown, the
+// average) only renders once expanded: it's the thing worth a tap, not the
+// thing worth scanning six of in a row.
+function workoutCard(D, i, w, idx) {
+  const curve = workoutHrCurve(D, i, w);
+  const zones = ch.zoneMinutes(curve, D.rhr[i], D.hrmax);
+  const meta = [`${ch.clock12(ch.mins(w.start))} · ${w.min}m`, w.cal != null ? `${w.cal} cal` : ""]
+    .filter(Boolean).join(" · ");
+  return `<div class="card">
+    <button type="button" class="wsummary" data-wtoggle="${idx}" aria-expanded="false" aria-controls="wexpand-${idx}">
+      <span class="wtype">${titleCase(w.type)}</span>
+      <span class="wmeta">${meta}</span>
+      <span class="wchev">›</span>
+    </button>
+    <div class="wexpand" id="wexpand-${idx}" hidden>
+      <div class="readrow"><p class="readout" aria-live="polite"></p>${stepper}</div>
+      <div class="chartbox scrubbable">${ch.hrIntraday(W, { curve, hrmax: D.hrmax, rhr: D.rhr[i] })}</div>
+      ${zones ? `<div class="stats" style="grid-template-columns:repeat(5,1fr);margin-top:14px">
+        ${[0, 1, 2, 3, 4].map((z) => stat(zones[z] + "m", "Z" + (z + 1), z ? ZONE[z] : null)).join("")}</div>` : ""}
+      ${w.avg_hr != null ? `<p class="note">${w.avg_hr} bpm average</p>` : ""}
+    </div>
+  </div>`;
+}
 
 function renderDetailBody(kind) {
   const D = DATA, i = dayIdx, t = viewFor(D, i);

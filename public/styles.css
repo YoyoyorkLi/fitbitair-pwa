@@ -185,6 +185,18 @@ a{color:var(--accent)}
 .workrow .wtime{color:var(--muted);font-size:12.5px}
 .workrow .wmetrics{color:var(--dim);font-size:12.5px;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
 
+/* #workout-day's per-workout cards: collapsed to time/duration/calories,
+   expanding on tap to the heart-rate chart and zone breakdown. The summary
+   button IS the card's header -- no separate h2, since the chevron and the
+   tap target need to be the same element the glance-able info sits on. */
+.wsummary{display:flex;align-items:baseline;gap:10px;width:100%;text-align:left;
+  font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;
+  -webkit-tap-highlight-color:transparent}
+.wsummary .wtype{font-weight:600;font-size:14.5px}
+.wsummary .wmeta{flex:1;color:var(--muted);font-size:12.5px;font-variant-numeric:tabular-nums;text-align:right}
+.wsummary .wchev{color:var(--dim);font-size:16px;line-height:1;width:14px;text-align:center}
+.wexpand{margin-top:16px}
+
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .stat{background:var(--panel2);border-radius:5px;padding:14px 8px;text-align:center}
 .stat .v{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.15}
