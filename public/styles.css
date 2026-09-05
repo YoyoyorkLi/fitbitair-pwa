@@ -203,11 +203,19 @@ a{color:var(--accent)}
   position:fixed;inset:0;z-index:25;background:var(--bg);overflow-y:auto;
   padding:max(22px,env(safe-area-inset-top)) 16px max(40px,env(safe-area-inset-bottom));
 }
-.detail-head{display:flex;align-items:center;gap:12px;margin-bottom:18px}
-.detail-head h1{font-size:19px;font-weight:600;margin:0;letter-spacing:-.01em}
-.detail-dial{display:flex;justify-content:center;margin:4px 0}
-.detail-dial svg{width:100%;max-width:220px;height:auto}
-.detail .note.center{text-align:center;margin-top:0}
+.detail-head{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+/* Bigger than a kpi tile's ring on purpose: on a tile it shares the row with
+   two others and 220px (the old ceiling here too) already crowded them, but
+   a full-screen detail has nothing beside it -- at 220px in a ~340px-wide
+   phone it read as a small ring adrift in a lot of empty margin rather than
+   as the hero of the screen it now is. */
+.detail-dial{display:flex;justify-content:center;margin:10px 0 8px}
+.detail-dial svg{width:100%;max-width:280px;height:auto}
+/* margin-bottom is the fix here, not margin-top: .note is 0-bottom by
+   default (the usual case is a caption sitting flush above the next .card's
+   own top margin), which on this page meant the caption text touched the
+   very next card's border with no gap at all. */
+.detail .note.center{text-align:center;margin:0 0 18px}
 
 /* sign in */
 .stack{display:flex;flex-direction:column;gap:14px;margin:22px 0}

@@ -8,9 +8,9 @@
 // the preview and the app cannot drift, because there is only one renderer.
 //
 // The dashboard is scoped to ONE NIGHT at a time (dayIdx), stepped with the
-// header's ‹ › controls. Everything the Day and Sleep tabs draw comes out of
-// the arrays already loaded for the whole 45-night window, so stepping is a
-// re-render and never a fetch.
+// header's ‹ › controls. Everything the Day tab and its card-detail overlays
+// draw comes out of the arrays already loaded for the whole 45-night window,
+// so stepping is a re-render and never a fetch.
 
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/+esm";
 import * as ch from "./charts.js";
@@ -55,8 +55,8 @@ const card = (ttl, inner, note, scrub = true) => {
 
 let sb = null, DATA = null, isDemo = false;
 
-// Which night the Day and Sleep tabs are showing. -1 until data lands, then
-// pinned to the newest night; the ‹ › controls and the swipe gesture move it.
+// Which night the Day tab is showing. -1 until data lands, then pinned to
+// the newest night; the ‹ › controls and the swipe gesture move it.
 let dayIdx = -1;
 
 // Chart width in CSS pixels, measured not assumed -- charts.js authors its
@@ -422,15 +422,11 @@ function primeReadouts(root) {
 // strict: 64px of travel and twice as much horizontal as vertical, or a thumb
 // drifting during a normal scroll would throw you onto another night.
 function bindSwipe(root) {
-  let sx = 0, sy = 0, sTop = 0, live = false;
+  let sx = 0, sy = 0, sTop = 0, sDTop = 0, live = false;
   root.addEventListener("pointerdown", (e) => {
     if (e.pointerType === "mouse") return;
     if (e.target.closest?.("svg[data-scrub], button, a, input")) return;
-    // The card-detail overlay is a child of #dash (see openDetail), so this
-    // listener reaches its charts too -- a swipe over blank space in there
-    // must not silently step the day underneath a screen that isn't showing it.
-    if (!$("detail").hidden) return;
-    sx = e.clientX; sy = e.clientY; sTop = scrollY; live = true;
+    sx = e.clientX; sy = e.clientY; sTop = scrollY; sDTop = $("detail").scrollTop; live = true;
   });
   // iOS hands a gesture to its own scroller and CANCELS our pointer rather than
   // ending it. Without this the flag stayed set, and a later, unrelated
@@ -443,10 +439,16 @@ function bindSwipe(root) {
     live = false;
     // If the page moved under the finger, that was a scroll, whatever the net
     // horizontal distance ended up being. Cheaper and far more reliable than
-    // trying to out-guess the gesture from dx/dy alone.
-    if (Math.abs(scrollY - sTop) > 8) return;
+    // trying to out-guess the gesture from dx/dy alone. Two scroll containers
+    // share this root -- the page behind, and #detail's own overflow-y when
+    // it is open -- so both are checked; only one is ever actually moving.
+    if (Math.abs(scrollY - sTop) > 8 || Math.abs($("detail").scrollTop - sDTop) > 8) return;
     const dx = e.clientX - sx, dy = e.clientY - sy;
     if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 2) return;
+    // The card detail is a full-screen overlay, not a day -- a qualifying
+    // swipe closes it (any direction: there is nowhere else for it to go)
+    // rather than falling through to the day stepper underneath it.
+    if (!$("detail").hidden) return closeDetail();
     if (currentTab() === "trends") return;
     setDay(dayIdx + (dx < 0 ? 1 : -1));
   });
@@ -917,34 +919,14 @@ function renderDay() {
     ${card(`Steps — ${stepsDays} days`, ch.bars(W, D, D.steps, stepsDays, col("steps"), kfmt, "steps"))}
     ${card(`Strain vs target — ${strainDays} days`, ch.strainHistory(W, D, strainDays))}`;
 
-  // A night has no sleep until you have slept it. Measured on live data: the
-  // current day comes back with strain 0.68, ~900 heart-rate samples and every
-  // sleep field NaN, which crashes hm() and the hypnogram. Fall back to the
-  // most recent night at or before this one that actually has stages.
-  const slept = ok(t.asleep) && ok(t.deep);
-  const sn = slept ? t : lastSleptNight(D, i) ?? t;
-  const hyp = D.hypnos[slept ? i : sn.i ?? i];
-  const colDays = win(D, 14, 7), debtDays = win(D, 30, 14);
-
-  $("sleep").innerHTML = `
-    ${slept ? "" : `<div class="banner">No sleep recorded for
-      <b>${t.night}</b> — showing the night of <b>${sn.night ?? "the last full night"}</b>.</div>`}
-    <div class="card"><div class="stats">
-      ${stat(ok(sn.asleep) ? hm(sn.asleep) : "—", "Asleep")}${stat(ok(sn.eff) ? sn.eff + "%" : "—", "Efficiency")}
-      ${stat(ok(sn.need) ? hm(sn.need) : "—", "Needed")}${stat(ok(sn.score) ? sn.score : "—", "Sleep score", sn.score >= 80 ? col("good") : col("awake"))}
-    </div></div>
-    ${card("Hypnogram", ch.hypnogram(W, hyp))}
-    ${card("Stages vs your 30-night baseline", ch.stagesVsBaseline(W, D, sn), "", false)}
-    ${card(`Sleep consistency — last ${colDays} nights`, ch.sleepColumns(W, D, colDays))}
-    ${card(`Sleep debt — ${debtDays} days`, ch.debtArea(W, D, debtDays))}`;
-
   primeReadouts($("dash"));
   if (detailKind) { $("detail-body").innerHTML = renderDetailBody(detailKind); primeReadouts($("detail")); }
 }
 
 // -------------------------------------------------------------- card detail
 // Each Day-tab dial opens onto the charts that actually explain its number,
-// instead of sending you hunting across the Day/Sleep/Trends tabs for them.
+// instead of sending you hunting across the Day and Trends tabs for them --
+// this is also where the old standalone Sleep tab's charts now live.
 const DETAIL_TITLE = { strain: "Day strain", recovery: "Recovery", sleep: "Sleep score" };
 let detailKind = null;   // re-rendered by renderDay() above whenever open, so a sync or resize can't leave it stale
 
@@ -1033,21 +1015,29 @@ function renderDetailBody(kind) {
       ${card(`Sleep score — ${trendDays} nights`, ch.sparkline(W, D, D.score, col("rem"), trendDays, ""))}`;
   }
 
-  // sleep — same "last slept night" fallback renderDay() uses, so a day with
-  // no sleep yet drills into last night's rather than a blank ring.
+  // sleep — same "last slept night" fallback renderDay() used to, back when
+  // this was its own tab, so a day with no sleep yet drills into last
+  // night's rather than a blank ring.
   const slept = ok(t.asleep) && ok(t.deep);
   const sn = slept ? t : lastSleptNight(D, i) ?? t;
   const sIdx = slept ? i : sn.i ?? i;
   const hyp = D.hypnos[sIdx];
-  const remDays = win(D, 30, 14);
+  const remDays = win(D, 30, 14), colDays = win(D, 14, 7), debtDays = win(D, 30, 14);
   return `
     ${slept ? "" : `<div class="banner">No sleep recorded for <b>${t.night}</b> — showing the night of
       <b>${sn.night ?? "the last full night"}</b>.</div>`}
     <div class="detail-dial">${ch.ring(sn.score, ok(sn.score) && sn.score >= 80 ? col("good") : col("awake"), "Sleep score", ok(sn.score) ? `Sleep score ${sn.score}|${hm(sn.asleep)} asleep of ${hm(sn.need)} needed` : "No sleep recorded|this night has not been scored")}</div>
     <p class="note center">${ok(sn.asleep) ? `<b>${hm(sn.asleep)}</b> asleep of <b>${hm(sn.need)}</b> needed` : "not yet scored"}</p>
+    <div class="card"><div class="stats">
+      ${stat(ok(sn.asleep) ? hm(sn.asleep) : "—", "Asleep")}${stat(ok(sn.eff) ? sn.eff + "%" : "—", "Efficiency")}
+      ${stat(ok(sn.need) ? hm(sn.need) : "—", "Needed")}${stat(ok(sn.score) ? sn.score : "—", "Sleep score", sn.score >= 80 ? col("good") : col("awake"))}
+    </div></div>
     ${card("Hypnogram", ch.hypnogram(W, hyp))}
     ${card("Heart rate during sleep", ch.hrIntraday(W, { curve: sleepHrCurve(D, sIdx, hyp), hrmax: D.hrmax, rhr: sn.rhr }))}
-    ${card(`REM — ${remDays} nights`, ch.sparkline(W, D, D.rem, col("rem"), remDays, "min"))}`;
+    ${card(`REM — ${remDays} nights`, ch.sparkline(W, D, D.rem, col("rem"), remDays, "min"))}
+    ${card("Stages vs your 30-night baseline", ch.stagesVsBaseline(W, D, sn), "", false)}
+    ${card(`Sleep consistency — last ${colDays} nights`, ch.sleepColumns(W, D, colDays))}
+    ${card(`Sleep debt — ${debtDays} days`, ch.debtArea(W, D, debtDays))}`;
 }
 
 // The dose-response chart pools every night the account has ever had -- more
@@ -1097,7 +1087,7 @@ function renderTrendCharts(D, days) {
 for (const btn of document.querySelectorAll(".tab")) {
   btn.addEventListener("click", () => {
     for (const b of document.querySelectorAll(".tab")) b.setAttribute("aria-selected", String(b === btn));
-    for (const id of ["today", "sleep", "trends"]) $(id).hidden = id !== btn.dataset.tab;
+    for (const id of ["today", "trends"]) $(id).hidden = id !== btn.dataset.tab;
     // Trends pools every night the account has; a night selector on top of it
     // would be a control that changes nothing.
     $("daynav").hidden = btn.dataset.tab === "trends";
