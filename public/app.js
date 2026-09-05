@@ -168,7 +168,7 @@ addEventListener("click", (e) => {
 });
 // Bumped by hand whenever the scrubber changes. Compared against the commit
 // /api/config reports, so a stale cached bundle is visible instead of inferred.
-const BUILD = "no-axis-release";
+const BUILD = "readout-in-place";
 let dbgBox = null;
 function dbg(line) {
   if (!DBG) return;
@@ -194,13 +194,35 @@ function bandsOf(svgEl) {
 function writeReadout(svgEl, tipText, live) {
   const box = svgEl.closest(".card")?.querySelector(".readout");
   if (!box) return;
-  box.textContent = "";
-  String(tipText).split("|").forEach((s, i) => {
-    const el = document.createElement(i ? "span" : "b");
-    el.textContent = s;
-    box.appendChild(el);
-  });
+  const parts = String(tipText).split("|");
+
+  // Update the existing nodes IN PLACE instead of destroying and recreating
+  // them. A drag calls this on every move -- up to 60x a second -- and the old
+  // version cleared the box and built fresh <b>/<span> elements each time,
+  // inside an aria-live region, mid-gesture. On device the readout has been
+  // seen updating its date while the value stayed on a number from an earlier
+  // touch, which is what a half-applied rebuild looks like. Nothing needs
+  // rebuilding when only the text differs.
+  if (box.childElementCount !== parts.length) {
+    box.textContent = "";
+    for (let i = 0; i < parts.length; i++) {
+      box.appendChild(document.createElement(i ? "span" : "b"));
+    }
+  }
+  for (let i = 0; i < parts.length; i++) {
+    const el = box.children[i];
+    if (el.textContent !== parts[i]) el.textContent = parts[i];
+  }
   box.classList.toggle("live", !!live);
+
+  // What the DOM actually ended up holding, logged only when the tip changes.
+  // If a recording ever again shows a stale number on screen, this says
+  // whether the string was wrong (our bug) or right (a paint bug) -- which is
+  // the question the last round could not answer.
+  if (DBG && box.dataset.last !== tipText) {
+    box.dataset.last = tipText;
+    dbg(`readout <- ${tipText}  ||  shows "${box.textContent}"`);
+  }
 }
 
 function setScrub(svgEl, idx, live = true) {
