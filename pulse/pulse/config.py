@@ -79,10 +79,18 @@ DEFAULT_WINDOW_DAYS = 30
 #   Interval -> {type}.interval.start_time
 #   Session  -> {type}.interval.end_time      (note: END, not start)
 #   Daily    -> {type}.date
+#
+# exercise is the one session type that breaks its own row above: every other
+# filter field on it (interval.start_time, interval.end_time, civil_end_time)
+# 400s as INVALID_DATA_POINT_FILTER_DATA_TYPE_MEMBER. Only civil_start_time --
+# a plain date, not a timestamp -- works. Found by trying all four against a
+# live account on 2026-09-05, not from documentation. ingest.fetch() special-
+# cases any field containing "civil_" to format the query as a date.
 DATA_TYPES = {
     "heart-rate":                   ("sample",   "heart_rate.sample_time.physical_time"),
     "sleep":                        ("session",  "sleep.interval.end_time"),
     "steps":                        ("interval", "steps.interval.start_time"),
+    "exercise":                     ("session",  "exercise.interval.civil_start_time"),
     "daily-resting-heart-rate":     ("daily",    "daily_resting_heart_rate.date"),
     "daily-heart-rate-variability": ("daily",    "daily_heart_rate_variability.date"),
     "daily-respiratory-rate":       ("daily",    "daily_respiratory_rate.date"),

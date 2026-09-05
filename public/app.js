@@ -30,7 +30,11 @@ const { hm, ok, col, ZONE } = ch;
 // handler) rebuilds part of the Trends tab independently of a full render(),
 // and needs the same markup helpers -- one definition, not a second copy that
 // could quietly drift from the first.
-const kpi = (c, cap, sub) => `<div class="kpi">${c}<p class="cap">${cap}</p><p class="sub">${sub}</p></div>`;
+// `detail`, when given, turns the tile into a button opening the matching
+// card-detail overlay (see openDetail below) instead of a plain div.
+const kpi = (c, cap, sub, detail) => detail
+  ? `<button type="button" class="kpi" data-detail="${detail}">${c}<p class="cap">${cap}</p><p class="sub">${sub}</p></button>`
+  : `<div class="kpi">${c}<p class="cap">${cap}</p><p class="sub">${sub}</p></div>`;
 const stat = (v, k, c) => `<div class="stat"><div class="v"${c ? ` style="color:${c}"` : ""}>${v}</div><div class="k">${k}</div></div>`;
 // Scrubbable charts get a readout row between the title and the chart: the
 // values land THERE rather than in a bubble under your thumb. On a phone the
@@ -422,6 +426,10 @@ function bindSwipe(root) {
   root.addEventListener("pointerdown", (e) => {
     if (e.pointerType === "mouse") return;
     if (e.target.closest?.("svg[data-scrub], button, a, input")) return;
+    // The card-detail overlay is a child of #dash (see openDetail), so this
+    // listener reaches its charts too -- a swipe over blank space in there
+    // must not silently step the day underneath a screen that isn't showing it.
+    if (!$("detail").hidden) return;
     sx = e.clientX; sy = e.clientY; sTop = scrollY; live = true;
   });
   // iOS hands a gesture to its own scroller and CANCELS our pointer rather than
@@ -496,6 +504,7 @@ function normalize(D) {
   D.curves ??= only(D.curve || []).map((v) => v || []);
   D.hypnos ??= only(D.hypno || null);
   D.drinkTimes ??= only(D.drink_times || []).map((v) => v || []);
+  D.workouts ??= only(D.workout_list || []).map((v) => v || []);
   for (const k of ["inBed", "need", "hrvBaseline"]) D[k] ??= [];
   return D;
 }
@@ -547,6 +556,7 @@ async function loadLive() {
     // so browsing back through nights costs nothing beyond the render.
     curves: data.map((r) => (Array.isArray(r.hr_curve) ? r.hr_curve : [])),
     hypnos: data.map(hypnoFrom),
+    workouts: data.map((r) => (Array.isArray(r.workouts) ? r.workouts : [])),
     drinkTimes: data.map(() => []),
   };
 
@@ -888,9 +898,9 @@ function renderDay() {
 
   $("today").innerHTML = `
     <div class="kpis">
-      ${kpi(ch.gauge(t.strain, 21, col("strain"), "Day strain", `Day strain ${t.strain} of 21|Banister TRIMP over every sample, log-compressed`), "Day strain", "target 12.6–15.6")}
-      ${kpi(ch.ring(t.recovery, recCol, "Recovery", `Recovery ${t.recovery}|55% HRV · 25% resting HR · 20% sleep`), "Recovery", t.recovery >= 67 ? "well recovered" : t.recovery >= 34 ? "moderate" : "low")}
-      ${kpi(ch.ring(t.score, ok(t.score) && t.score >= 80 ? col("good") : col("awake"), "Sleep score", ok(t.score) ? `Sleep score ${t.score}|${hm(t.asleep)} asleep of ${hm(t.need)} needed` : "No sleep recorded|this night has not been scored"), "Sleep score", ok(t.asleep) ? hm(t.asleep) : "not yet")}
+      ${kpi(ch.gauge(t.strain, 21, col("strain"), "Day strain", `Day strain ${t.strain} of 21|Banister TRIMP over every sample, log-compressed`), "Day strain", "target 12.6–15.6", "strain")}
+      ${kpi(ch.ring(t.recovery, recCol, "Recovery", `Recovery ${t.recovery}|55% HRV · 25% resting HR · 20% sleep`), "Recovery", t.recovery >= 67 ? "well recovered" : t.recovery >= 34 ? "moderate" : "low", "recovery")}
+      ${kpi(ch.ring(t.score, ok(t.score) && t.score >= 80 ? col("good") : col("awake"), "Sleep score", ok(t.score) ? `Sleep score ${t.score}|${hm(t.asleep)} asleep of ${hm(t.need)} needed` : "No sleep recorded|this night has not been scored"), "Sleep score", ok(t.asleep) ? hm(t.asleep) : "not yet", "sleep")}
     </div>
     ${strip}
     <div class="card"><div class="stats">
@@ -929,6 +939,115 @@ function renderDay() {
     ${card(`Sleep debt — ${debtDays} days`, ch.debtArea(W, D, debtDays))}`;
 
   primeReadouts($("dash"));
+  if (detailKind) { $("detail-body").innerHTML = renderDetailBody(detailKind); primeReadouts($("detail")); }
+}
+
+// -------------------------------------------------------------- card detail
+// Each Day-tab dial opens onto the charts that actually explain its number,
+// instead of sending you hunting across the Day/Sleep/Trends tabs for them.
+const DETAIL_TITLE = { strain: "Day strain", recovery: "Recovery", sleep: "Sleep score" };
+let detailKind = null;   // re-rendered by renderDay() above whenever open, so a sync or resize can't leave it stale
+
+function openDetail(kind) {
+  detailKind = kind;
+  $("detail-title").textContent = DETAIL_TITLE[kind] || "";
+  $("detail-body").innerHTML = renderDetailBody(kind);
+  $("detail").hidden = false;
+  $("detail").scrollTop = 0;
+  primeReadouts($("detail"));
+}
+function closeDetail() {
+  detailKind = null;
+  $("detail").hidden = true;
+  tip.hidden = true;
+}
+$("dash").addEventListener("click", (e) => {
+  const b = e.target.closest?.(".kpi[data-detail]");
+  if (b) openDetail(b.dataset.detail);
+});
+$("detail-close").addEventListener("click", closeDetail);
+addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("detail").hidden) closeDetail(); });
+
+// From the resolved night's hypnogram, pull the matching stretch of heart-rate
+// curve. h.start (clock time) and h.span (total minutes) already say exactly
+// when the session ran; whether start+span crosses midnight decides whether
+// the evening half lives in yesterday's civil-day curve or today's, per the
+// "night = wake date" convention main_sleeps() uses server-side (pulse/metrics.py)
+// -- a session that never crosses midnight has its wake date equal to its own
+// start date, so there is nothing to reach into D.curves[i-1] for at all.
+function sleepHrCurve(D, i, h) {
+  if (!h?.segs?.length || i < 0) return null;
+  const startMin = ch.mins(h.start), endAbs = startMin + h.span;
+  if (endAbs <= 1440) {
+    const same = (D.curves[i] || []).filter((p) => { const m = ch.mins(p[0]); return m >= startMin && m <= endAbs; });
+    return same.length ? same : null;
+  }
+  if (i < 1) return null;
+  const endWrapped = endAbs - 1440;
+  const evening = (D.curves[i - 1] || []).filter((p) => ch.mins(p[0]) >= startMin);
+  const morning = (D.curves[i] || []).filter((p) => ch.mins(p[0]) <= endWrapped);
+  const merged = [...evening, ...morning];
+  return merged.length ? merged : null;
+}
+
+// "CARDIO_WORKOUT" -> "Cardio workout". Google's exerciseType enum is
+// SHOUT_CASE; nothing else on this page is.
+const titleCase = (s) => String(s).toLowerCase().replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+const workoutRow = (w) => `<div class="workrow">
+    <div><span class="wtype">${titleCase(w.type)}</span><span class="wtime"> · ${ch.clock12(ch.mins(w.start))} · ${w.min}m</span></div>
+    <div class="wmetrics">${[w.cal != null ? `${w.cal} cal` : "", w.avg_hr != null ? `${w.avg_hr} bpm avg` : ""].filter(Boolean).join(" · ")}</div>
+  </div>`;
+
+function renderDetailBody(kind) {
+  const D = DATA, i = dayIdx, t = viewFor(D, i);
+
+  if (kind === "strain") {
+    const strainDays = win(D, 21, 10), stepsDays = win(D, 30, 14);
+    const workouts = D.workouts[i] || [];
+    return `
+      <div class="detail-dial">${ch.gauge(t.strain, 21, col("strain"), "Day strain", `Day strain ${t.strain} of 21|Banister TRIMP over every sample, log-compressed`)}</div>
+      <p class="note center">target <b>12.6–15.6</b>${ok(t.steps) ? ` · <b>${t.steps.toLocaleString()}</b> steps` : ""}</p>
+      ${card(`Strain vs target — ${strainDays} days`, ch.strainHistory(W, D, strainDays))}
+      ${card("Workouts", workouts.length
+        ? `<div class="worklist">${workouts.map(workoutRow).join("")}</div>`
+        : `<p class="note" style="margin:0">No workouts detected for this day.</p>`, "", false)}
+      ${card(`Steps — ${stepsDays} days`, ch.bars(W, D, D.steps, stepsDays, col("steps"), kfmt, "steps"))}
+      ${card("Time in zone", `<div class="stats" style="grid-template-columns:repeat(5,1fr)">
+        ${[0, 1, 2, 3, 4].map((k) => stat(Math.round(D.z[k]?.[i] || 0) + "m", "Z" + (k + 1), k ? ZONE[k] : null)).join("")}</div>`, "", false)}
+      <p class="note">Strain is Banister TRIMP integrated over every heart-rate sample, so passive
+        activity counts too — workouts above are shown for context, not added on top.</p>`;
+  }
+
+  if (kind === "recovery") {
+    const recCol = t.recovery >= 67 ? col("good") : t.recovery >= 34 ? col("awake") : col("warn");
+    const trendDays = win(D, 30, 14);
+    const hrvBaseUsed = ok(t.hrvBaseline) ? t.hrvBaseline : ch.slope(D).base;
+    const hrvPct = Math.round((t.hrv / hrvBaseUsed) * 100);
+    return `
+      <div class="detail-dial">${ch.ring(t.recovery, recCol, "Recovery", `Recovery ${t.recovery}|55% HRV · 25% resting HR · 20% sleep`)}</div>
+      <p class="note center">55% HRV · 25% resting heart rate · 20% sleep score, each against your
+        rolling baseline${ok(hrvPct) ? ` — HRV is <b>${hrvPct}%</b> of yours` : ""}</p>
+      ${card(`Recovery — ${trendDays} days`, ch.sparkline(W, D, D.recovery, recCol, trendDays, ""))}
+      ${card(`HRV (rMSSD) — ${trendDays} days`, ch.sparkline(W, D, D.hrv, col("accent"), trendDays, "ms"))}
+      ${card(`Resting heart rate — ${trendDays} days`, ch.sparkline(W, D, D.rhr, col("warn"), trendDays, "bpm"))}
+      ${card(`Sleep score — ${trendDays} nights`, ch.sparkline(W, D, D.score, col("rem"), trendDays, ""))}`;
+  }
+
+  // sleep — same "last slept night" fallback renderDay() uses, so a day with
+  // no sleep yet drills into last night's rather than a blank ring.
+  const slept = ok(t.asleep) && ok(t.deep);
+  const sn = slept ? t : lastSleptNight(D, i) ?? t;
+  const sIdx = slept ? i : sn.i ?? i;
+  const hyp = D.hypnos[sIdx];
+  const remDays = win(D, 30, 14);
+  return `
+    ${slept ? "" : `<div class="banner">No sleep recorded for <b>${t.night}</b> — showing the night of
+      <b>${sn.night ?? "the last full night"}</b>.</div>`}
+    <div class="detail-dial">${ch.ring(sn.score, ok(sn.score) && sn.score >= 80 ? col("good") : col("awake"), "Sleep score", ok(sn.score) ? `Sleep score ${sn.score}|${hm(sn.asleep)} asleep of ${hm(sn.need)} needed` : "No sleep recorded|this night has not been scored")}</div>
+    <p class="note center">${ok(sn.asleep) ? `<b>${hm(sn.asleep)}</b> asleep of <b>${hm(sn.need)}</b> needed` : "not yet scored"}</p>
+    ${card("Hypnogram", ch.hypnogram(W, hyp))}
+    ${card("Heart rate during sleep", ch.hrIntraday(W, { curve: sleepHrCurve(D, sIdx, hyp), hrmax: D.hrmax, rhr: sn.rhr }))}
+    ${card(`REM — ${remDays} nights`, ch.sparkline(W, D, D.rem, col("rem"), remDays, "min"))}`;
 }
 
 // The dose-response chart pools every night the account has ever had -- more
@@ -999,7 +1118,7 @@ $("day-next").addEventListener("click", () => setDay(dayIdx + 1));
 $("stamp").addEventListener("click", () => DATA && setDay(DATA.dates.length - 1));
 $("pastbar").addEventListener("click", () => DATA && setDay(DATA.dates.length - 1));
 addEventListener("keydown", (e) => {
-  if (!DATA || $("dash").hidden || currentTab() === "trends") return;
+  if (!DATA || $("dash").hidden || currentTab() === "trends" || !$("detail").hidden) return;
   if (e.target.matches?.("input,textarea")) return;
   if (e.key === "ArrowLeft") setDay(dayIdx - 1);
   if (e.key === "ArrowRight") setDay(dayIdx + 1);

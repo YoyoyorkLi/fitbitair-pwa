@@ -262,6 +262,45 @@ def normalize_sleep(points):
     return sorted(out, key=lambda n: n["end"])
 
 
+def normalize_exercise(points):
+    """Workout sessions -- passively detected by the band, not logged by hand.
+
+    activeDuration is a Duration string ("1231.200s"), separate from the
+    session's wall-clock interval ("true active time excluding pauses"). A live
+    account showed a WORKOUT with activeDuration=61423s (~17h) against a much
+    shorter interval -- an auto-detection artifact, not a real session -- so
+    activeDuration is clamped to the wall-clock span rather than trusted
+    outright.
+    """
+    out = []
+    for p in points:
+        e = p.get("exercise")
+        if not e:
+            continue
+        iv = e.get("interval") or {}
+        if "startTime" not in iv or "endTime" not in iv:
+            continue
+        start, end = to_local(iv["startTime"]), to_local(iv["endTime"])
+        span_min = (end - start).total_seconds() / 60
+        if span_min <= 0:
+            continue
+
+        dur = e.get("activeDuration") or ""
+        active_min = _f(dur[:-1]) / 60 if dur.endswith("s") else None
+        if active_min is None or active_min <= 0 or active_min > span_min * 1.2:
+            active_min = span_min
+
+        ms = e.get("metricsSummary") or {}
+        out.append({
+            "start": start, "end": end, "active_min": active_min,
+            "type": e.get("exerciseType") or "WORKOUT",
+            "calories": _f(ms.get("caloriesKcal")),
+            "avg_hr": _f(ms.get("averageHeartRateBeatsPerMinute")),
+            "steps": _f(ms.get("steps")),
+        })
+    return sorted(out, key=lambda w: w["start"])
+
+
 def main_sleeps(nights):
     """One session per calendar day: the longest. Drops naps, which would
     otherwise render as 'last night' and wreck every sleep metric."""

@@ -179,6 +179,12 @@ create table public.nights (
   -- points, 4.9KB/night, 1.7MB/year, and pixel-identical at chart width.
   hr_curve        jsonb,
 
+  -- Passively-detected workout sessions that started this civil day, from the
+  -- Google Health "exercise" data type -- not logged by hand:
+  --   [{"type":"WALKING","start":"16:41","min":21,"cal":146,"avg_hr":116}, ...]
+  -- Null on a day with none, same convention as steps for "nothing yet".
+  workouts        jsonb,
+
   updated_at      timestamptz not null default now()
 );
 
@@ -281,7 +287,8 @@ select
        then round(extract(epoch from (n.hr_nadir_at - n.sleep_start)) / 60)::int end
        as min_to_nadir,
 
-  n.hr_curve
+  n.hr_curve,
+  n.workouts
 from public.nights n
 full outer join (
   select night,

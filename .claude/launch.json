@@ -6,6 +6,12 @@
       "runtimeExecutable": "node",
       "runtimeArgs": [".claude/serve.mjs", "8899"],
       "port": 8899
+    },
+    {
+      "name": "pwa-live",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vercel", "dev", "--listen", "3210", "--yes"],
+      "port": 3210
     }
   ]
 }

@@ -101,8 +101,10 @@ def _explain(e, data_type):
 def fetch(data_type, start: datetime, end: datetime, token, method="list"):
     """One data type, one window, following pagination to the end."""
     kind, field = cfg.DATA_TYPES[data_type]
-    if kind == "daily":
-        # Daily types filter on a civil date, not an instant.
+    # Daily types filter on a civil date, not an instant -- and so does any
+    # other type whose configured field is a civil_* variant (see exercise in
+    # config.py: a session type that still wants a plain date, not a timestamp).
+    if kind == "daily" or "civil_" in field:
         expr = f'{field} >= "{start:%Y-%m-%d}" AND {field} < "{end:%Y-%m-%d}"'
     else:
         expr = (f'{field} >= "{start.astimezone(UTC):%Y-%m-%dT%H:%M:%SZ}" AND '

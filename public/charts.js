@@ -49,7 +49,7 @@ const ampm = (h) => (h < 12 ? "a" : "p");
 const h12 = (h) => (h % 12 === 0 ? 12 : h % 12);
 const wrap = (t) => ((Math.round(t) % 1440) + 1440) % 1440;
 /** minute-of-day (may run past midnight) -> "11:42p" */
-const clock12 = (t) => {
+export const clock12 = (t) => {
   const m = wrap(t), h = Math.floor(m / 60);
   return `${h12(h)}:${String(m % 60).padStart(2, "0")}${ampm(h)}`;
 };
@@ -290,7 +290,7 @@ export function hypnogram(W, h, ht = 244) {
 // Everything below works in "absolute minutes since the first sample" instead,
 // unrolled once here, so the x scale is honestly proportional to time rather
 // than to array index — those two disagree wherever the curve has a gap.
-const mins = (s) => { const [a, b] = String(s).split(":").map(Number); return a * 60 + b; };
+export const mins = (s) => { const [a, b] = String(s).split(":").map(Number); return a * 60 + b; };
 const hhmm = (t) => `${String(Math.floor((t % 1440) / 60)).padStart(2, "0")}:${String(Math.round(t) % 60).padStart(2, "0")}`;
 const unroll = (list, t0) => list.map((v) => { let m = mins(v); while (m < t0) m += 1440; return m; });
 

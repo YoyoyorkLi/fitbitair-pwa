@@ -232,6 +232,22 @@ def _daily_steps(con):
     return out
 
 
+def _daily_workouts(con):
+    """Workouts grouped by the civil day they started on -- same convention
+    as _daily_steps, so a row's `workouts` lines up with its `steps`."""
+    out = {}
+    for w in mx.normalize_exercise(ingest.load("exercise", con)):
+        d = w["start"].date()
+        out.setdefault(d, []).append({
+            "type": w["type"],
+            "start": w["start"].strftime("%H:%M"),
+            "min": int(round(w["active_min"])),
+            "cal": int(round(w["calories"])) if w["calories"] is not None else None,
+            "avg_hr": int(round(w["avg_hr"])) if w["avg_hr"] is not None else None,
+        })
+    return out
+
+
 def _baseline(series, upto, days=None):
     """Trailing median over the baseline window, excluding the night itself.
 
@@ -252,6 +268,7 @@ def build_rows(con=None):
     try:
         D = render.compute(con)
         steps = _daily_steps(con)
+        workouts = _daily_workouts(con)
         spo2_f = cfg.DAILY_FIELDS["daily-oxygen-saturation"][1]
         spo2_df = mx.normalize_daily(
             ingest.load("daily-oxygen-saturation", con),
@@ -301,6 +318,7 @@ def build_rows(con=None):
             "resp_rate": _clean(rr.get(night)),
             "spo2": _clean(spo2.get(night)),
             "steps": _clean(steps.get(night.date())),
+            "workouts": workouts.get(night.date()) or None,
             "sleep_start": _clean(start),
             "sleep_end": _clean(end),
             "total_sleep_min": _clean(r.get("asleep")),

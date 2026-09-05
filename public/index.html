@@ -68,6 +68,18 @@
   <div id="today"></div>
   <div id="sleep" hidden></div>
   <div id="trends" hidden></div>
+
+  <!-- Drill-down for one of the three Day-tab dials. Lives inside #dash,
+       layered on top of it, rather than as a fourth tab -- closing it has to
+       restore exactly the day and tab you left, and nesting it here means
+       every scrub/tip listener already bound to #dash reaches it for free. -->
+  <div id="detail" class="detail" hidden>
+    <div class="detail-head">
+      <button id="detail-close" class="nav" type="button" aria-label="Back">‹</button>
+      <h1 id="detail-title"></h1>
+    </div>
+    <div id="detail-body"></div>
+  </div>
 </section>
 
 <section id="loading" class="screen">
