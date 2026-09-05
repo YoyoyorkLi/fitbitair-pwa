@@ -950,14 +950,11 @@ function renderDay() {
     <div class="card"><div class="stats">
       ${stat(ok(t.hrv) ? t.hrv : "—", "HRV ms", recCol)}${stat(ok(t.rhr) ? t.rhr : "—", "RHR bpm")}
       ${stat(ok(t.steps) ? t.steps.toLocaleString() : "—", "Steps", col("steps"))}${stat(ok(t.debt) ? hm(t.debt) : "—", "Sleep debt")}
-    </div>${latest ? `<p class="note">Today is still in progress — strain, steps and time-in-zone are running
+    </div>${latest ? `<p class="note">Today is still in progress — strain and steps are running
       totals and keep climbing until midnight.</p>` : ""}</div>
     ${card("Heart rate", ch.hrIntraday(W, {
         curve: D.curves[i], drinks: D.drinkTimes[i], hrmax: D.hrmax, rhr: t.rhr,
       }))}
-    ${card("Time in zone", `<div class="stats" style="grid-template-columns:repeat(5,1fr)">
-      ${[0, 1, 2, 3, 4].map((k) => stat(Math.round(D.z[k]?.[i] || 0) + "m", "Z" + (k + 1), k ? ZONE[k] : null)).join("")}</div>`,
-      "", false)}
     ${card(`Steps — ${stepsDays} days`, ch.bars(W, D, D.steps, stepsDays, col("steps"), kfmt, "steps"))}
     ${card(`Strain vs target — ${strainDays} days`, ch.strainHistory(W, D, strainDays))}`;
 
@@ -1209,6 +1206,16 @@ function renderDetailBody(kind) {
   const sIdx = slept ? i : sn.i ?? i;
   const hyp = D.hypnos[sIdx];
   const remDays = win(D, 30, 14), colDays = win(D, 14, 7), debtDays = win(D, 30, 14);
+  // Tonight's target, mirroring sleep_series()'s formula server-side
+  // (metrics.py): an 8h core, plus up to an hour more for today's strain so
+  // far (the "previous day" input the formula wants, from tonight's point of
+  // view), plus up to 90 minutes pulled from whatever debt sn (the last
+  // COMPLETED night) already carries. Only shown on the latest day -- on a
+  // past day "tonight" has no coherent meaning, since that night already
+  // happened and sn.need already says what it needed.
+  const tonightNeed = i === D.dates.length - 1 && ok(D.strain[i]) && ok(sn.debt)
+    ? 480 + Math.min(60, 6 * Math.max(0, D.strain[i] - 10)) + Math.min(90, 0.4 * sn.debt)
+    : NaN;
   return `
     ${slept ? "" : `<div class="banner">No sleep recorded for <b>${t.night}</b> — showing the night of
       <b>${sn.night ?? "the last full night"}</b>.</div>`}
@@ -1216,8 +1223,9 @@ function renderDetailBody(kind) {
     <p class="note center">${ok(sn.asleep) ? `<b>${hm(sn.asleep)}</b> asleep of <b>${hm(sn.need)}</b> needed` : "not yet scored"}</p>
     <div class="card"><div class="stats">
       ${stat(ok(sn.asleep) ? hm(sn.asleep) : "—", "Asleep")}${stat(ok(sn.eff) ? sn.eff + "%" : "—", "Efficiency")}
-      ${stat(ok(sn.need) ? hm(sn.need) : "—", "Needed")}${stat(ok(sn.score) ? sn.score : "—", "Sleep Score", sn.score >= 80 ? col("good") : col("awake"))}
-    </div></div>
+      ${stat(ok(sn.need) ? hm(sn.need) : "—", "Needed last night")}${stat(ok(sn.score) ? sn.score : "—", "Sleep Score", sn.score >= 80 ? col("good") : col("awake"))}
+    </div>${ok(tonightNeed) ? `<p class="note">Needed tonight: <b>${hm(tonightNeed)}</b> — 8h core, plus up to an hour
+      for today's strain so far, plus up to 90 minutes paying down last night's debt.</p>` : ""}</div>
     ${card("Hypnogram", ch.hypnogram(W, hyp))}
     ${card("Heart rate during sleep", ch.hrIntraday(W, { curve: sleepHrCurve(D, sIdx, hyp), hrmax: D.hrmax, rhr: sn.rhr }))}
     ${card(`REM — ${remDays} nights`, ch.sparkline(W, D, D.rem, col("rem"), remDays, "min"))}

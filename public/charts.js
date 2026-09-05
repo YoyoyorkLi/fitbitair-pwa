@@ -387,7 +387,13 @@ export function hrIntraday(W, { curve, drinks = [], hrmax, rhr, zoned = false })
     return svg(W, 92, txt(W / 2, 50, "no heart-rate curve stored for this day", { anchor: "middle" }),
       "No heart rate curve for this day");
   }
-  const pts = bucket(curve);
+  // A workout is at most 6h (MAX_SESSION_MIN, metrics.py) and usually well
+  // under an hour, so the 5-minute bucketing built for a full 16h day would
+  // throw away most of the detail a short session actually has -- a 22-minute
+  // walk has only 22 raw samples to begin with, and bucketing to 5-minute
+  // means would leave ~4 points. push.py already stores hr_curve at 1-minute
+  // resolution, so zoned charts just draw it as-is.
+  const pts = zoned ? curve : bucket(curve);
   const b = pts.map((p) => p[1]), lo = Math.min(...b) - 8, hi = Math.max(...b) + 8;
   const t = unroll(pts.map((p) => p[0]), mins(pts[0][0]));
   const span = t[t.length - 1] - t[0] || 1;
@@ -470,10 +476,31 @@ export function hrIntraday(W, { curve, drinks = [], hrmax, rhr, zoned = false })
   // index and printed "HH:MM" — at 7 labels on a phone that was a solid smear.
   // Divisor sized for "11 PM" (5 chars), wider than the old lowercase "11p".
   const hourStep = Math.max(1, Math.ceil(span / 60 / Math.max(2, Math.floor(W / 62))));
+  const hourTicks = [];
   for (let m = Math.ceil(t[0] / 60) * 60, k = 0; m <= t[t.length - 1]; m += 60, k++) {
     if (k % hourStep) continue;
-    p += txt(X(m), yAxis, tick12(m), { size: 9.5, anchor: "middle" });
+    hourTicks.push(m);
   }
+  // Hour-aligned ticks work for a full day, which always crosses several, but
+  // a session under ~2h (any workout) can cross zero or one -- a 56-minute
+  // weights set spanning 3:29-4:25 only ever has "4 PM" to show, leaving both
+  // ends of the chart unlabeled and the whole thing looking cut off. Below 3
+  // ticks, fall back to evenly-spaced marks across the data's OWN start and
+  // end instead of the clock's hour grid, so a short chart always shows where
+  // it begins and ends. Labeled with minutes (clock12) rather than the bare
+  // hour (tick12): four marks inside one hour would otherwise all print the
+  // same "5 PM" and look like a labeling bug rather than four real times.
+  const short = hourTicks.length < 3;
+  const ticks = short ? [0, 1, 2, 3].map((k) => t[0] + (span * k) / 3) : hourTicks;
+  ticks.forEach((m, k) => {
+    // The fallback's first and last ticks sit exactly on the chart's own
+    // edges (t[0] and t[last]) rather than an hour boundary with margin on
+    // both sides -- center-anchoring "6:27 PM" there overflows it half past
+    // the edge and clips. Anchor those two outward instead; the two middle
+    // ticks have room and stay centered.
+    const anchor = short && k === 0 ? "start" : short && k === ticks.length - 1 ? "end" : "middle";
+    p += txt(X(m), yAxis, short ? clock12(m) : tick12(m), { size: 9.5, anchor });
+  });
   p += scrubLayer(y0, y1);
   return svg(W, h, p, "Heart rate across the night with zone bands and drink markers", "time");
 }

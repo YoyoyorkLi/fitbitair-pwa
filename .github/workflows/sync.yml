@@ -71,5 +71,10 @@ jobs:
           GH_CLIENT_ID: ${{ secrets.GH_CLIENT_ID }}
           GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
           PULSE_TZ: ${{ secrets.PULSE_TZ }}
+          # config.py's hrmax (Tanaka: 208 - 0.7*age) feeds strain, zone
+          # bounds and every Karvonen threshold -- a runner has no local
+          # pulse/.env to read this from, so without it every scheduled run
+          # silently used the "23" default regardless of what .env said.
+          PULSE_AGE: ${{ secrets.PULSE_AGE }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
