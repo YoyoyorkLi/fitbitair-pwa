@@ -432,20 +432,32 @@ function primeReadouts(root) {
 // gesture every phone user already has muscle memory for.
 const CLOSE_EDGE_PX = 28;
 
+// Logged the same way bindScrub's gestures are (see dbg() above): every
+// attempt, not just the ones that end up qualifying. The scrubber bug looked
+// completely different from every angle reasoned about it in advance and was
+// only found by reading a log of what iOS actually delivered -- no reason to
+// assume this gesture is any more predictable in advance than that one was.
 function bindSwipe(root) {
   let sx = 0, sy = 0, sTop = 0, sDTop = 0, live = false;
   root.addEventListener("pointerdown", (e) => {
     if (e.pointerType === "mouse") return;
     if (e.target.closest?.("svg[data-scrub], button, a, input")) return;
-    if (!$("detail").hidden && e.clientX > CLOSE_EDGE_PX) return;
+    if (!$("detail").hidden && e.clientX > CLOSE_EDGE_PX) {
+      if (DBG) dbg(`swipe rejected: x=${e.clientX} > edge ${CLOSE_EDGE_PX} ${CTX}`);
+      return;
+    }
     sx = e.clientX; sy = e.clientY; sTop = scrollY; sDTop = $("detail").scrollTop; live = true;
+    if (DBG) dbg(`swipe start: x=${sx} y=${sy} detailOpen=${!$("detail").hidden} ${CTX}`);
   });
   // iOS hands a gesture to its own scroller and CANCELS our pointer rather than
   // ending it. Without this the flag stayed set, and a later, unrelated
   // pointerup got measured against a stale start point -- which silently
   // stepped the day. That is how you end up reading yesterday without having
   // touched the date control.
-  root.addEventListener("pointercancel", () => { live = false; });
+  root.addEventListener("pointercancel", () => {
+    if (DBG && live) dbg(`swipe cancelled ${CTX}`);
+    live = false;
+  });
   root.addEventListener("pointerup", (e) => {
     if (!live) return;
     live = false;
@@ -454,8 +466,10 @@ function bindSwipe(root) {
     // trying to out-guess the gesture from dx/dy alone. Two scroll containers
     // share this root -- the page behind, and #detail's own overflow-y when
     // it is open -- so both are checked; only one is ever actually moving.
-    if (Math.abs(scrollY - sTop) > 8 || Math.abs($("detail").scrollTop - sDTop) > 8) return;
     const dx = e.clientX - sx, dy = e.clientY - sy;
+    const scrolled = Math.abs(scrollY - sTop) > 8 || Math.abs($("detail").scrollTop - sDTop) > 8;
+    if (DBG) dbg(`swipe end: dx=${dx | 0} dy=${dy | 0} scrolled=${scrolled} ${CTX}`);
+    if (scrolled) return;
     if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 2) return;
     // The card detail is a full-screen overlay, not a day -- a qualifying
     // swipe closes it (any direction: there is nowhere else for it to go)
