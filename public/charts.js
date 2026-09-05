@@ -115,6 +115,13 @@ const scrubLayer = (y0, y1) => `<g class="scrubg" hidden>
 // -------------------------------------------------------------------- axes
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const md = (iso) => { const p = String(iso).split("-"); return `${+p[1]}/${+p[2]}`; };
+const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+// Explicit y/m/d args, not `new Date(iso)`: the latter parses as UTC midnight,
+// which getDay() then reads back in the browser's LOCAL zone -- west of UTC
+// that is still "yesterday" at any hour before the local offset catches up,
+// so every date would read one weekday early. The constructor's y/m/d form
+// builds local midnight directly; no zone conversion, no room for the bug.
+const wd = (iso) => { const p = String(iso).split("-"); return WD[new Date(+p[0], +p[1] - 1, +p[2]).getDay()]; };
 /** "Aug 29" — for readouts, where "2026-08-29" spent ten characters on nothing. */
 export const dlabel = (iso) => {
   const p = String(iso).split("-");
@@ -131,12 +138,17 @@ export const dlabel = (iso) => {
 // the right edge unlabelled whenever n-1 is not a multiple of the stride, and
 // the right edge is the one date a trend is actually read against; a ragged gap
 // at the old end costs nothing by comparison.
+// A window of 14 days or less never repeats a weekday across two labelled
+// ticks at the usual stride, so "Mon Wed Fri" reads unambiguously; past that
+// the same name would land on two different weeks with nothing distinguishing
+// them, so it falls back to the calendar date.
 function dateAxis(W, dates, i0, n, s, y) {
   const step = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(W / 58))));
+  const fmt = n <= 14 ? wd : md;
   let out = "";
   for (let i = n - 1; i >= 0; i -= step) {
     const d = dates[i0 + i];
-    if (d) out += txt(s.x(i), y, md(d), { size: 9.5, anchor: "middle" });
+    if (d) out += txt(s.x(i), y, fmt(d), { size: 9.5, anchor: "middle" });
   }
   return out;
 }
