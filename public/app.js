@@ -436,6 +436,13 @@ function primeReadouts(root) {
 // gesture every phone user already has muscle memory for.
 const CLOSE_EDGE_PX = 28;
 
+// Whichever full-screen overlay is actually on top, or null. #workout-day can
+// be open OVER #detail (a workout row inside the Strain detail opens it), so
+// it takes priority -- closing the TOPMOST screen is the only thing "back"
+// can mean when two are stacked.
+const topOverlay = () => (!$("workout-day").hidden ? $("workout-day") : !$("detail").hidden ? $("detail") : null);
+const closeTopOverlay = () => (!$("workout-day").hidden ? closeWorkoutDay() : closeDetail());
+
 // Logged the same way bindScrub's gestures are (see dbg() above): every
 // attempt, not just the ones that end up qualifying. The scrubber bug looked
 // completely different from every angle reasoned about it in advance and was
@@ -446,12 +453,13 @@ function bindSwipe(root) {
   root.addEventListener("pointerdown", (e) => {
     if (e.pointerType === "mouse") return;
     if (e.target.closest?.("svg[data-scrub], button, a, input")) return;
-    if (!$("detail").hidden && e.clientX > CLOSE_EDGE_PX) {
+    const ov = topOverlay();
+    if (ov && e.clientX > CLOSE_EDGE_PX) {
       if (DBG) dbg(`swipe rejected: x=${e.clientX} > edge ${CLOSE_EDGE_PX} ${CTX}`);
       return;
     }
-    sx = e.clientX; sy = e.clientY; sTop = scrollY; sDTop = $("detail").scrollTop; live = true;
-    if (DBG) dbg(`swipe start: x=${sx} y=${sy} detailOpen=${!$("detail").hidden} ${CTX}`);
+    sx = e.clientX; sy = e.clientY; sTop = scrollY; sDTop = ov ? ov.scrollTop : 0; live = true;
+    if (DBG) dbg(`swipe start: x=${sx} y=${sy} overlay=${ov ? ov.id : "none"} ${CTX}`);
   });
   // iOS hands a gesture to its own scroller and CANCELS our pointer rather than
   // ending it. Without this the flag stayed set, and a later, unrelated
@@ -468,17 +476,19 @@ function bindSwipe(root) {
     // If the page moved under the finger, that was a scroll, whatever the net
     // horizontal distance ended up being. Cheaper and far more reliable than
     // trying to out-guess the gesture from dx/dy alone. Two scroll containers
-    // share this root -- the page behind, and #detail's own overflow-y when
-    // it is open -- so both are checked; only one is ever actually moving.
+    // share this root -- the page behind, and whichever overlay's own
+    // overflow-y when one is open -- so both are checked; only one is ever
+    // actually moving.
     const dx = e.clientX - sx, dy = e.clientY - sy;
-    const scrolled = Math.abs(scrollY - sTop) > 8 || Math.abs($("detail").scrollTop - sDTop) > 8;
+    const ov = topOverlay();
+    const scrolled = Math.abs(scrollY - sTop) > 8 || (ov && Math.abs(ov.scrollTop - sDTop) > 8);
     if (DBG) dbg(`swipe end: dx=${dx | 0} dy=${dy | 0} scrolled=${scrolled} ${CTX}`);
     if (scrolled) return;
     if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 2) return;
-    // The card detail is a full-screen overlay, not a day -- a qualifying
-    // swipe closes it (any direction: there is nowhere else for it to go)
-    // rather than falling through to the day stepper underneath it.
-    if (!$("detail").hidden) return closeDetail();
+    // A full-screen overlay is not a day -- a qualifying swipe closes the
+    // topmost one (any direction: there is nowhere else for it to go) rather
+    // than falling through to the day stepper underneath it.
+    if (ov) return closeTopOverlay();
     if (currentTab() === "trends") return;
     setDay(dayIdx + (dx < 0 ? 1 : -1));
   });
@@ -711,7 +721,9 @@ function render() {
   if (dayIdx < 0 || dayIdx >= D.dates.length) dayIdx = D.dates.length - 1;
   $("demo-banner").hidden = !isDemo;
   renderTrends(D);
+  renderWorkoutsTab(D);
   renderDay();
+  if (workoutDayIdx != null && !$("workout-day").hidden) { renderWorkoutDayBody(); primeReadouts($("workout-day")); }
   if (!bound) {
     bound = true;
     bindTips($("dash"));
@@ -973,12 +985,50 @@ function closeDetail() {
   $("detail").hidden = true;
   tip.hidden = true;
 }
+
+// One day's workouts -- opened from a marked day on the Workouts calendar, or
+// from a workout row on the Strain detail. `i` is an index into D.dates, the
+// same convention as dayIdx, but independent of it: browsing a past day's
+// workouts from the calendar must not change which night the Day tab is on.
+let workoutDayIdx = null;   // re-rendered by render() below whenever open, same reasoning as detailKind
+
+function openWorkoutDay(i) {
+  workoutDayIdx = i;
+  renderWorkoutDayBody();
+  $("workout-day").hidden = false;
+  $("workout-day").scrollTop = 0;
+  primeReadouts($("workout-day"));
+}
+function closeWorkoutDay() {
+  workoutDayIdx = null;
+  $("workout-day").hidden = true;
+  tip.hidden = true;
+}
+function renderWorkoutDayBody() {
+  const D = DATA, i = workoutDayIdx;
+  const workouts = D.workouts[i] || [];
+  $("workout-day-title").textContent = ch.dlabel(D.dates[i]);
+  $("workout-day-body").innerHTML = workouts.length
+    ? workouts.map((w) => workoutCard(D, i, w)).join("")
+    : `<p class="note">No workouts recorded for this day.</p>`;
+}
+
 $("dash").addEventListener("click", (e) => {
   const b = e.target.closest?.(".kpi[data-detail]");
-  if (b) openDetail(b.dataset.detail);
+  if (b) return openDetail(b.dataset.detail);
+  const w = e.target.closest?.(".workrow[data-workout-day]");
+  if (w) return openWorkoutDay(Number(w.dataset.workoutDay));
+  const cell = e.target.closest?.(".calcell.has[data-day-idx]");
+  if (cell) return openWorkoutDay(Number(cell.dataset.dayIdx));
+  if (e.target.closest?.("#cal-prev")) return stepCalMonth(-1);
+  if (e.target.closest?.("#cal-next")) return stepCalMonth(1);
 });
 $("detail-close").addEventListener("click", closeDetail);
-addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("detail").hidden) closeDetail(); });
+$("workout-day-close").addEventListener("click", closeWorkoutDay);
+// #workout-day can be open OVER #detail (opened from a Strain-detail workout
+// row); closeTopOverlay (defined with bindSwipe above) closes whichever is
+// topmost, so Escape and the edge-swipe agree on the same order.
+addEventListener("keydown", (e) => { if (e.key === "Escape" && topOverlay()) closeTopOverlay(); });
 
 // From the resolved night's hypnogram, pull the matching stretch of heart-rate
 // curve. h.start (clock time) and h.span (total minutes) already say exactly
@@ -1005,10 +1055,38 @@ function sleepHrCurve(D, i, h) {
 // "CARDIO_WORKOUT" -> "Cardio workout". Google's exerciseType enum is
 // SHOUT_CASE; nothing else on this page is.
 const titleCase = (s) => String(s).toLowerCase().replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
-const workoutRow = (w) => `<div class="workrow">
+// A button, not a static row: tapping it opens #workout-day for `dayIdx` --
+// the same screen a marked day on the Workouts calendar opens, showing every
+// workout that day (not just this one). See the note on #workout-day in
+// index.html for why it's the whole day rather than just this row.
+const workoutRow = (w, dayIdx) => `<button type="button" class="workrow" data-workout-day="${dayIdx}">
     <div><span class="wtype">${titleCase(w.type)}</span><span class="wtime"> · ${ch.clock12(ch.mins(w.start))} · ${w.min}m</span></div>
     <div class="wmetrics">${[w.cal != null ? `${w.cal} cal` : "", w.avg_hr != null ? `${w.avg_hr} bpm avg` : ""].filter(Boolean).join(" · ")}</div>
-  </div>`;
+  </button>`;
+
+// From a workout's own start clock + duration (already clamped to <=6h, see
+// normalize_exercise() in metrics.py), pull the matching stretch of the day's
+// heart-rate curve. Unlike sleepHrCurve, no wake-date offset is needed here --
+// _daily_workouts() groups by the workout's OWN start date, the same civil day
+// D.curves[i] already is, so a same-day session just slices D.curves[i]; only
+// a session that itself crosses midnight needs D.curves[i + 1] too.
+function workoutHrCurve(D, i, w) {
+  const startMin = ch.mins(w.start), endAbs = startMin + w.min;
+  if (endAbs <= 1440) {
+    const same = (D.curves[i] || []).filter((p) => { const m = ch.mins(p[0]); return m >= startMin && m <= endAbs; });
+    return same.length ? same : null;
+  }
+  const endWrapped = endAbs - 1440;
+  const first = (D.curves[i] || []).filter((p) => ch.mins(p[0]) >= startMin);
+  const second = (D.curves[i + 1] || []).filter((p) => ch.mins(p[0]) <= endWrapped);
+  const merged = [...first, ...second];
+  return merged.length ? merged : null;
+}
+
+const workoutCard = (D, i, w) => card(
+  `${titleCase(w.type)} · ${ch.clock12(ch.mins(w.start))} · ${w.min}m`,
+  ch.hrIntraday(W, { curve: workoutHrCurve(D, i, w), hrmax: D.hrmax, rhr: D.rhr[i] }),
+  [w.cal != null ? `${w.cal} cal` : "", w.avg_hr != null ? `${w.avg_hr} bpm avg` : ""].filter(Boolean).join(" · "));
 
 function renderDetailBody(kind) {
   const D = DATA, i = dayIdx, t = viewFor(D, i);
@@ -1021,7 +1099,7 @@ function renderDetailBody(kind) {
       <p class="note center">target <b>12.6–15.6</b>${ok(t.steps) ? ` · <b>${t.steps.toLocaleString()}</b> steps` : ""}</p>
       ${card(`Strain vs target — ${strainDays} days`, ch.strainHistory(W, D, strainDays))}
       ${card("Workouts", workouts.length
-        ? `<div class="worklist">${workouts.map(workoutRow).join("")}</div>`
+        ? `<div class="worklist">${workouts.map((w) => workoutRow(w, i)).join("")}</div>`
         : `<p class="note" style="margin:0">No workouts detected for this day.</p>`, "", false)}
       ${card(`Steps — ${stepsDays} days`, ch.bars(W, D, D.steps, stepsDays, col("steps"), kfmt, "steps"))}
       ${card("Time in zone", `<div class="stats" style="grid-template-columns:repeat(5,1fr)">
@@ -1068,6 +1146,61 @@ function renderDetailBody(kind) {
     ${card("Stages vs your 30-night baseline", ch.stagesVsBaseline(W, D, sn), "", false)}
     ${card(`Sleep consistency — last ${colDays} nights`, ch.sleepColumns(W, D, colDays))}
     ${card(`Sleep debt — ${debtDays} days`, ch.debtArea(W, D, debtDays))}`;
+}
+
+// ----------------------------------------------------------------- workouts
+// A real month calendar: one cell per day, a dot on days that had a workout,
+// tap one to open #workout-day. calYear/calMonth track which month is showing
+// independently of dayIdx -- browsing March from the calendar has nothing to
+// do with which night the Day tab is scoped to.
+let calYear = null, calMonth = null;   // calMonth is 0-indexed, JS Date style
+
+function stepCalMonth(delta) {
+  calMonth += delta;
+  if (calMonth < 0) { calMonth = 11; calYear--; }
+  if (calMonth > 11) { calMonth = 0; calYear++; }
+  renderWorkoutsTab(DATA);
+}
+
+const pad2 = (n) => String(n).padStart(2, "0");
+const CAL_WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
+
+function renderWorkoutsTab(D) {
+  // Defaults to the month containing the newest synced night, not the
+  // browser's real "today" -- those can disagree (a sync that hasn't run
+  // yet, a phone in the wrong timezone), and every other date on this page
+  // is already anchored to the account's own data rather than the clock.
+  if (calYear == null) {
+    const [y, m] = D.dates[D.dates.length - 1].split("-").map(Number);
+    calYear = y; calMonth = m - 1;
+  }
+  const byDate = new Map(D.dates.map((d, i) => [d, i]));
+  const first = new Date(calYear, calMonth, 1);
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const monthLabel = first.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+
+  let cells = "";
+  for (let k = 0; k < first.getDay(); k++) cells += `<div class="calcell empty"></div>`;
+  for (let day = 1; day <= daysInMonth; day++) {
+    const iso = `${calYear}-${pad2(calMonth + 1)}-${pad2(day)}`;
+    const idx = byDate.get(iso);
+    const n = idx != null ? (D.workouts[idx]?.length || 0) : 0;
+    cells += n
+      ? `<button type="button" class="calcell has" data-day-idx="${idx}">${day}<span class="dot">${n > 1 ? n : ""}</span></button>`
+      : `<div class="calcell${idx == null ? " out" : ""}">${day}</div>`;
+  }
+
+  $("workouts").innerHTML = `
+    <div class="calnav">
+      <button class="nav" id="cal-prev" type="button" aria-label="Previous month">‹</button>
+      <p class="calmonth">${monthLabel}</p>
+      <button class="nav" id="cal-next" type="button" aria-label="Next month">›</button>
+    </div>
+    <div class="calgrid">
+      ${CAL_WEEKDAYS.map((d) => `<div class="calhead">${d}</div>`).join("")}
+      ${cells}
+    </div>
+    <p class="note" style="margin-top:14px">Days outlined in teal had a workout — tap one to see it.</p>`;
 }
 
 // The dose-response chart pools every night the account has ever had -- more
@@ -1117,10 +1250,12 @@ function renderTrendCharts(D, days) {
 for (const btn of document.querySelectorAll(".tab")) {
   btn.addEventListener("click", () => {
     for (const b of document.querySelectorAll(".tab")) b.setAttribute("aria-selected", String(b === btn));
-    for (const id of ["today", "trends"]) $(id).hidden = id !== btn.dataset.tab;
-    // Trends pools every night the account has; a night selector on top of it
-    // would be a control that changes nothing.
-    $("daynav").hidden = btn.dataset.tab === "trends";
+    for (const id of ["today", "workouts", "trends"]) $(id).hidden = id !== btn.dataset.tab;
+    // Trends pools every night the account has, and Workouts has its own
+    // month navigation -- a night selector on top of either would be a
+    // control that changes nothing on Trends, and a second, conflicting
+    // "which date" control on Workouts.
+    $("daynav").hidden = btn.dataset.tab !== "today";
     tip.hidden = true;
   });
 }
@@ -1138,7 +1273,7 @@ $("day-next").addEventListener("click", () => setDay(dayIdx + 1));
 $("stamp").addEventListener("click", () => DATA && setDay(DATA.dates.length - 1));
 $("pastbar").addEventListener("click", () => DATA && setDay(DATA.dates.length - 1));
 addEventListener("keydown", (e) => {
-  if (!DATA || $("dash").hidden || currentTab() === "trends" || !$("detail").hidden) return;
+  if (!DATA || $("dash").hidden || currentTab() === "trends" || topOverlay()) return;
   if (e.target.matches?.("input,textarea")) return;
   if (e.key === "ArrowLeft") setDay(dayIdx - 1);
   if (e.key === "ArrowRight") setDay(dayIdx + 1);

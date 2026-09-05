@@ -47,6 +47,7 @@
 
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" aria-selected="true"  data-tab="today">Day</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="workouts">Workouts</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="trends">Trends</button>
   </div>
 
@@ -64,6 +65,7 @@
   </div>
 
   <div id="today"></div>
+  <div id="workouts" hidden></div>
   <div id="trends" hidden></div>
 
   <!-- Drill-down for one of the three Day-tab dials. Lives inside #dash,
@@ -76,6 +78,21 @@
       <h1 id="detail-title"></h1>
     </div>
     <div id="detail-body"></div>
+  </div>
+
+  <!-- One day's workouts: opened from a marked day on the Workouts calendar,
+       or from a workout row on the Strain detail -- same screen either way,
+       so "click on the workout" means the same thing everywhere it appears.
+       Stacks visually on top of #detail (higher z-index in styles.css) rather
+       than closing it first, since the Strain-detail entry point opens this
+       from inside that overlay and closing it should come back to the Strain
+       detail, not all the way out to the Day tab. -->
+  <div id="workout-day" class="detail" hidden>
+    <div class="detail-head">
+      <button id="workout-day-close" class="nav" type="button" aria-label="Back">‹</button>
+      <h1 id="workout-day-title"></h1>
+    </div>
+    <div id="workout-day-body"></div>
   </div>
 </section>
 
