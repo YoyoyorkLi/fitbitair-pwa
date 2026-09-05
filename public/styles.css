@@ -155,6 +155,24 @@ a{color:var(--accent)}
 .readout.live{color:var(--muted)}
 .readout.live b{color:var(--text)}
 
+/* The readout and its steppers share one row.
+   Steppers exist because on iOS the drag is not reliably ours to have: taps
+   land on the right band every time, but movement between them is withheld by
+   the platform in at least the installed-PWA context. Tap to get close, step
+   to land exactly -- and unlike a drag, neither one puts a finger over the
+   chart you are reading. They are ordinary buttons OUTSIDE .chartbox, so the
+   touch-action:none that covers the chart does not reach them.
+   The row reserves its height for the same reason the readout always did:
+   nothing may move while you are interacting with it. */
+.readrow{display:flex;align-items:center;gap:6px;margin:-8px 0 10px}
+.readrow .readout{margin:0;flex:1;min-width:0}
+.stepper{display:flex;gap:2px;flex:none}
+.step{background:var(--panel);border:1px solid var(--grid);color:var(--text);
+  width:30px;height:30px;line-height:1;font-size:17px;padding:0;border-radius:6px;
+  display:flex;align-items:center;justify-content:center;
+  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+.step:active{background:var(--panel2)}
+
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .stat{background:var(--panel2);border-radius:5px;padding:14px 8px;text-align:center}
 .stat .v{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.15}

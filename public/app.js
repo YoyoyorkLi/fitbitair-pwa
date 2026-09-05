@@ -36,9 +36,18 @@ const stat = (v, k, c) => `<div class="stat"><div class="v"${c ? ` style="color:
 // values land THERE rather than in a bubble under your thumb. On a phone the
 // floating tooltip was the whole problem -- the finger covers the number it
 // just asked for, and lifting it takes the answer away with it.
-const card = (ttl, inner, note, scrub = true) =>
-  `<div class="card"><h2>${ttl}</h2>${scrub ? `<p class="readout" aria-live="polite"></p>` : ""}
-   <div class="chartbox${/data-scrub/.test(inner) ? " scrubbable" : ""}">${inner}</div>${note ? `<p class="note">${note}</p>` : ""}</div>`;
+// The steppers are the reason a phone does not need the drag to work. Tapping
+// a chart has always selected the right band on iOS -- it is only movement the
+// platform withholds -- so tap picks the neighbourhood and these walk it one
+// sample at a time, without a finger sitting on top of the chart.
+const stepper =
+  `<span class="stepper"><button type="button" class="step" data-step="-1" aria-label="Previous sample">&lsaquo;</button>` +
+  `<button type="button" class="step" data-step="1" aria-label="Next sample">&rsaquo;</button></span>`;
+const card = (ttl, inner, note, scrub = true) => {
+  const hasScrub = /data-scrub/.test(inner);
+  return `<div class="card"><h2>${ttl}</h2>${scrub ? `<div class="readrow"><p class="readout" aria-live="polite"></p>${hasScrub ? stepper : ""}</div>` : ""}
+   <div class="chartbox${hasScrub ? " scrubbable" : ""}">${inner}</div>${note ? `<p class="note">${note}</p>` : ""}</div>`;
+};
 
 let sb = null, DATA = null, isDemo = false;
 
@@ -139,7 +148,7 @@ function bindTips(root) {
 const DBG = new URLSearchParams(location.search).has("debug");
 // Bumped by hand whenever the scrubber changes. Compared against the commit
 // /api/config reports, so a stale cached bundle is visible instead of inferred.
-const BUILD = "scrub-descendants";
+const BUILD = "claim-touchstart+steppers";
 let dbgBox = null;
 function dbg(line) {
   if (!DBG) return;
@@ -177,6 +186,7 @@ function writeReadout(svgEl, tipText, live) {
 function setScrub(svgEl, idx, live = true) {
   const bands = bandsOf(svgEl), b = bands[idx];
   if (!b) return;
+  svgEl._i = idx;                         // where the steppers step from
   const g = svgEl.querySelector(".scrubg");
   if (g && live) {
     g.removeAttribute("hidden");
@@ -205,6 +215,12 @@ function scrubAt(svgEl, clientX) {
   dbg(`scrubAt ux=${ux.toFixed(0)} -> band ${best}/${bands.length}`);
   setScrub(svgEl, best);
 }
+
+// Safari tab or installed home-screen app? iOS runs those in different
+// contexts with different gesture recognizers, and every device log so far was
+// taken without recording which one produced it. It is one string; print it.
+const CTX = matchMedia("(display-mode: standalone)").matches ||
+            navigator.standalone ? "[PWA]" : "[tab]";
 
 function bindScrub(root) {
   let drag = null, sx = 0, sy = 0, axis = null;
@@ -238,7 +254,7 @@ function bindScrub(root) {
   };
 
   const end = (why) => {
-    if (drag) dbg(`${why}: pointermoves=${nPointer} touchmoves=${nTouch} axis=${axis}`);
+    if (drag) dbg(`${why}: pointermoves=${nPointer} touchmoves=${nTouch} axis=${axis} ${CTX}`);
     drag = null; axis = null;
   };
 
@@ -260,23 +276,56 @@ function bindScrub(root) {
   // ours. Also a second chance at the movement when pointermove stays silent.
   root.addEventListener("touchmove", (e) => {
     if (!drag) return;
-    const t = e.touches[0];
-    if (!t) return;
-    nTouch++;
+    nTouch++;                             // count BEFORE any guard: the old
+    const t = e.touches[0];               // order could report 0 touchmoves
+    if (!t) return;                       // while touchmoves were arriving
     if (e.cancelable) e.preventDefault();
     move(t.clientX, t.clientY);
   }, { passive: false });
 
-  // A touchstart fallback for the same reason: if pointerdown is ever the
-  // stream that goes missing, the gesture still starts.
+  // Claim the gesture at touchstart, non-passively.
+  //
+  // This is the one thing eight attempts never actually did. Attempt #2 was
+  // "claim the gesture with preventDefault", but it put the call in the move
+  // handler -- which is the handler that never runs, so no preventDefault in
+  // the touch path has ever executed. Attempts #6-#10 all tried to say the
+  // same thing declaratively with touch-action, which WebKit applies to
+  // scrolling and zooming; it is not what arms the selection, callout and
+  // drag recognizers.
+  //
+  // preventDefault() on a NON-PASSIVE touchstart is the imperative version,
+  // and it is the documented way to tell WebKit a touch sequence belongs to
+  // the page. The old listener was registered { passive: true }, where
+  // preventDefault is a no-op the browser ignores, so this could not have
+  // worked even if it had been called.
+  //
+  // Cost: the synthesized click on a chart is suppressed. Nothing binds click
+  // on a chart -- scrubbing runs off pointerdown -- and page scrolling from a
+  // chart was already given up to touch-action:none, so there is nothing left
+  // here to lose. Steppers are outside .chartbox and keep their clicks.
   root.addEventListener("touchstart", (e) => {
-    if (drag) return;                     // pointerdown already handled it
     const s = e.target.closest?.("svg[data-scrub]");
     if (!s) return;
+    if (e.cancelable) e.preventDefault();
+    if (drag) return;                     // pointerdown already handled it
     const t = e.changedTouches[0];
     dbg(`touchstart (no pointerdown) -> ${s.dataset.scrub}`);
     begin(s, t.clientX, t.clientY);
-  }, { passive: true });
+  }, { passive: false });
+
+  // Delegated: cards are rebuilt by every render, so a handler per button
+  // would leak one set per re-render. Click (not pointerdown) because these
+  // are ordinary buttons and should repeat on key-activation too.
+  root.addEventListener("click", (e) => {
+    const b = e.target.closest?.(".step");
+    if (!b) return;
+    const svgEl = b.closest(".card")?.querySelector("svg[data-scrub]");
+    if (!svgEl) return;
+    const n = bandsOf(svgEl).length;
+    if (!n) return;
+    const cur = svgEl._i ?? n - 1;
+    setScrub(svgEl, Math.max(0, Math.min(n - 1, cur + Number(b.dataset.step))));
+  });
 
   addEventListener("pointerup", () => end("pointerup"));
   addEventListener("pointercancel", () => end("pointercancel"));
@@ -356,7 +405,7 @@ async function boot() {
         if (DBG) {
           fetch(`/api/config?nocache=${Date.now()}`, { cache: "no-store" })
             .then((r) => r.json())
-            .then((c) => dbg(`BUILD ${BUILD} | server ${c.commit || "?"} | ${BUILD === "scrub-descendants" ? "app.js is current" : "?"}`))
+            .then((c) => dbg(`BUILD ${BUILD} | server ${c.commit || "?"} | ${CTX}`))
             .catch(() => dbg(`BUILD ${BUILD} | server unreachable`));
         }
         sb = createClient(cfg.url, cfg.anonKey);
