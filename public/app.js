@@ -168,7 +168,7 @@ addEventListener("click", (e) => {
 });
 // Bumped by hand whenever the scrubber changes. Compared against the commit
 // /api/config reports, so a stale cached bundle is visible instead of inferred.
-const BUILD = "claim-touchstart+steppers+pwadbg";
+const BUILD = "steppers+pwadbg+bootline";
 let dbgBox = null;
 function dbg(line) {
   if (!DBG) return;
@@ -412,6 +412,12 @@ const currentTab = () => document.querySelector(".tab[aria-selected='true']")?.d
 // --------------------------------------------------------------------- boot
 async function boot() {
   const params = new URLSearchParams(location.search);
+  // Which bundle am I actually running? Printed FIRST and unconditionally
+  // under ?debug, before any branch. It used to live inside the live-data
+  // path, so ?demo=1&debug -- the link you hand someone to reproduce a bug --
+  // was the one mode that never said. "Is this even the new code?" is the
+  // first question every round of this bug has had to answer.
+  if (DBG) dbg(`BUILD ${BUILD} | ${CTX}`);
 
   if (!params.has("demo")) {
     try {
@@ -619,6 +625,7 @@ function lastSleptNight(D, upto) {
 
 // ------------------------------------------------------------------- render
 let bound = false;
+let reported = false;
 function render() {
   show("dash");
   W = chartWidth();
@@ -633,6 +640,14 @@ function render() {
     bindScrub($("dash"));
     bindSwipe($("dash"));
     watchWidth();
+  }
+  // The visible proof that the new bundle is the one running: old code renders
+  // no steppers at all, so "0" here and "BUILD ..." above disagree only if the
+  // HTML and the JS came from different deploys.
+  if (DBG && !reported) {
+    reported = true;
+    dbg(`rendered: ${document.querySelectorAll(".step").length} stepper buttons, ` +
+        `${document.querySelectorAll("svg[data-scrub]").length} scrub charts`);
   }
 }
 
