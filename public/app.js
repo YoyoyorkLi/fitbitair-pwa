@@ -145,10 +145,30 @@ function bindTips(root) {
 // Two fixes for the same frozen-scrubber bug were built on reasoning a desktop
 // browser could not falsify, and both were wrong. This prints what the phone
 // actually does. Entirely inert without the query param.
-const DBG = new URLSearchParams(location.search).has("debug");
+// ?debug turns the overlay on in a browser tab. It cannot turn it on in the
+// INSTALLED app, which is the context this bug is now suspected to live in:
+// the home-screen app launches at start_url ("/") with no address bar, so the
+// query string is unreachable, and its storage is a separate partition from
+// Safari's (see the sign-in note in index.html), so a flag set in the browser
+// does not carry across either. Five taps on the wordmark, then.
+const DBG_KEY = "pulse-debug";
+const stickyDbg = () => { try { return localStorage.getItem(DBG_KEY) === "1"; } catch { return false; } };
+let DBG = new URLSearchParams(location.search).has("debug") || stickyDbg();
+let brandTaps = 0, brandTimer = null;
+addEventListener("click", (e) => {
+  if (!e.target.closest?.(".brand")) return;
+  clearTimeout(brandTimer);
+  brandTimer = setTimeout(() => { brandTaps = 0; }, 2000);
+  if (++brandTaps < 5) return;
+  brandTaps = 0;
+  DBG = !DBG;
+  try { localStorage.setItem(DBG_KEY, DBG ? "1" : "0"); } catch { /* private mode */ }
+  if (DBG) dbg(`debug ON ${CTX} | BUILD ${BUILD} | tap the wordmark 5x to stop`);
+  else if (dbgBox) { dbgBox.remove(); dbgBox = null; }
+});
 // Bumped by hand whenever the scrubber changes. Compared against the commit
 // /api/config reports, so a stale cached bundle is visible instead of inferred.
-const BUILD = "claim-touchstart+steppers";
+const BUILD = "claim-touchstart+steppers+pwadbg";
 let dbgBox = null;
 function dbg(line) {
   if (!DBG) return;
