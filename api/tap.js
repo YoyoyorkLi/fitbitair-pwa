@@ -3,7 +3,7 @@
 // Two callers, one behaviour:
 //
 //   POST  from the iOS Shortcut. Body {"kind":"beer"}. Returns plain text,
-//         which Shortcuts renders as the notification: "Drink 3 · 11:42p".
+//         which Shortcuts renders as the notification: "Drink 3 · 11:42 PM".
 //
 //   GET   from the URL written on the tag, when the Shortcut is unavailable
 //         (new phone, reset automation, someone else's hand). iOS opens it in

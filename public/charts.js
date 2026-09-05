@@ -46,24 +46,24 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 
 // ------------------------------------------------------------------- clock
 // 12-hour throughout, matching localClock() in lib/night.js -- the tap
-// notification already said "Drink 3 · 11:42p", so the dashboard reading
+// notification already said "Drink 3 · 11:42 PM", so the dashboard reading
 // "23:42" was the odd one out, not the other way round.
 //
 // These format for DISPLAY only. Every clock value in flight stays "HH:MM"
 // 24-hour, because that is what mins() parses and what app.js writes when it
-// formats drink timestamps; converting at the source would mean parsing "a"/"p"
-// back out again on the next hop.
-const ampm = (h) => (h < 12 ? "a" : "p");
+// formats drink timestamps; converting at the source would mean parsing
+// "AM"/"PM" back out again on the next hop.
+const ampm = (h) => (h < 12 ? " AM" : " PM");
 const h12 = (h) => (h % 12 === 0 ? 12 : h % 12);
 const wrap = (t) => ((Math.round(t) % 1440) + 1440) % 1440;
-/** minute-of-day (may run past midnight) -> "11:42p" */
+/** minute-of-day (may run past midnight) -> "11:42 PM" */
 export const clock12 = (t) => {
   const m = wrap(t), h = Math.floor(m / 60);
   return `${h12(h)}:${String(m % 60).padStart(2, "0")}${ampm(h)}`;
 };
-/** minute-of-day -> "11p" -- hour ticks have no room for the minutes */
+/** minute-of-day -> "11 PM" -- hour ticks have no room for the minutes */
 const tick12 = (t) => { const h = Math.floor(wrap(t) / 60); return `${h12(h)}${ampm(h)}`; };
-/** "23:42" -> "11:42p" */
+/** "23:42" -> "11:42 PM" */
 const t12 = (s) => clock12(mins(s));
 
 /** A phone in portrait. Drives gutter widths and tick density, nothing else. */
@@ -263,7 +263,8 @@ export function hypnogram(W, h, ht = 244) {
   }
 
   // Hour ticks, strided so a phone gets ~4 rather than 9 overlapping ones.
-  const hourStep = Math.max(1, Math.ceil(h.span / 60 / Math.max(2, Math.floor(W / 52))));
+  // Divisor sized for "11 PM" (5 chars), wider than the old lowercase "11p".
+  const hourStep = Math.max(1, Math.ceil(h.span / 60 / Math.max(2, Math.floor(W / 68))));
   for (let m = 60 - (startMin % 60), k = 0; m < h.span; m += 60, k++) {
     if (k % hourStep) continue;
     p += txt(X(m), ht - 30, tick12(startMin + m), { size: 9, anchor: "middle" });
@@ -447,7 +448,8 @@ export function hrIntraday(W, { curve, drinks = [], hrmax, rhr }) {
 
   // Hour ticks on the clock, strided to fit. The old version stepped by array
   // index and printed "HH:MM" — at 7 labels on a phone that was a solid smear.
-  const hourStep = Math.max(1, Math.ceil(span / 60 / Math.max(2, Math.floor(W / 46))));
+  // Divisor sized for "11 PM" (5 chars), wider than the old lowercase "11p".
+  const hourStep = Math.max(1, Math.ceil(span / 60 / Math.max(2, Math.floor(W / 62))));
   for (let m = Math.ceil(t[0] / 60) * 60, k = 0; m <= t[t.length - 1]; m += 60, k++) {
     if (k % hourStep) continue;
     p += txt(X(m), yAxis, tick12(m), { size: 9.5, anchor: "middle" });

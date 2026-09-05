@@ -94,7 +94,7 @@ Every static `.json` fixture under `public/` is checked against strict
 POST /api/tap
   x-tag-token: <TAG_TOKEN>
   {"kind": "beer"}
-  → 200  "Drink 3 · 11:42p"
+  → 200  "Drink 3 · 11:42 PM"
 
 GET  /api/tap?t=<TAG_TOKEN>&kind=beer
   → 200  an HTML confirmation page
