@@ -378,7 +378,7 @@ const zoneIndex5 = (bpm, edges) => { for (let k = 0; k < 4; k++) { if (bpm < edg
  * workout detail. Every other caller (the Day tab, heart rate during sleep)
  * is unaffected.
  */
-export function hrIntraday(W, { curve, drinks = [], hrmax, rhr, zoned = false }) {
+export function hrIntraday(W, { curve, drinks = [], workouts = [], hrmax, rhr, zoned = false }) {
   const h = 232, x0 = padL(W), x1 = W - padR(W), y0 = 36, y1 = 186, yAxis = 208;
   // A night's row has no curve until that sleep session has ended and synced --
   // push.py only computes hr_curve once sleep_start/sleep_end exist. That is
@@ -414,6 +414,26 @@ export function hrIntraday(W, { curve, drinks = [], hrmax, rhr, zoned = false })
       if (yB > yT) p += `<rect x="${x0}" y="${yT.toFixed(1)}" width="${x1 - x0}" height="${(yB - yT).toFixed(1)}" fill="${palette[i]}" opacity=".16"/>`;
     }
   }
+  // Chart's own clock window -- clips both the workout bands below and the
+  // drink markers further down, so declared once rather than twice.
+  const tLo = t[0], tHi = t[t.length - 1];
+
+  // Workout overlay: a translucent full-height band over each session's own
+  // clock span, off by default (see the toggle in app.js's renderDay). Reuses
+  // unroll() so a workout starting late and crossing the chart's own midnight
+  // wrap lands at the same continuous-minute position the curve itself does;
+  // clipping to [tLo, tHi] lets a session that runs past this chart's own
+  // window just end at its edge instead of needing next-day data it doesn't have.
+  workouts.forEach((w) => {
+    const s = unroll([w.start], tLo)[0];
+    const e = s + (Number(w.min) || 0);
+    if (e < tLo || s > tHi) return;
+    const xs = X(Math.max(s, tLo)), xe = X(Math.min(e, tHi));
+    const label = String(w.type || "Workout").toLowerCase().replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+    p += `<rect x="${xs.toFixed(1)}" y="${y0}" width="${Math.max(xe - xs, 1.5).toFixed(1)}" height="${y1 - y0}"
+      fill="${col("workout")}" opacity=".2" data-tip="${esc(`${label}|${clock12(s)}–${clock12(e)}`)}"/>`;
+  });
+
   p += grid(x0, x1, [y0, (y0 + y1) / 2, y1]);
   if (zoned && edges) {
     // One short segment per consecutive pair rather than one polyline: SVG
@@ -444,7 +464,6 @@ export function hrIntraday(W, { curve, drinks = [], hrmax, rhr, zoned = false })
   // diameter, so a single row merged the numbered dots into an amber blob.
   // Alternating rows doubles the effective spacing without shrinking the target.
   const R = 6.5, ROWS = [y0 - 12, y0 - 27];
-  const tLo = t[0], tHi = t[t.length - 1];
   let lastX = -1e9, row = 0;
   drinks
     .map((s) => ({ at: s, v: mins(s) }))
@@ -502,7 +521,7 @@ export function hrIntraday(W, { curve, drinks = [], hrmax, rhr, zoned = false })
     p += txt(X(m), yAxis, short ? clock12(m) : tick12(m), { size: 9.5, anchor });
   });
   p += scrubLayer(y0, y1);
-  return svg(W, h, p, "Heart rate across the night with zone bands and drink markers", "time");
+  return svg(W, h, p, `Heart rate across the night with zone bands, drink markers${workouts.length ? " and workout times" : ""}`, "time");
 }
 
 // -------------------------------------------------------------------- bars

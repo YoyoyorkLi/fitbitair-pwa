@@ -914,6 +914,12 @@ setInterval(() => {
   if (DATA && !$("dash").hidden && dayIdx === DATA.dates.length - 1) updateDayNav(DATA, dayIdx);
 }, 60_000);
 
+// Off by default: most days have no workout, and the band would just be
+// visual noise on the one chart everyone opens first. Same localStorage
+// pattern as DBG_KEY above, so the choice sticks per device.
+const WO_KEY = "pulse-hr-workouts";
+let showWorkouts = (() => { try { return localStorage.getItem(WO_KEY) === "1"; } catch { return false; } })();
+
 function renderDay() {
   const D = DATA, i = dayIdx, t = viewFor(D, i);
   const latest = i === D.dates.length - 1;
@@ -952,8 +958,9 @@ function renderDay() {
       ${stat(ok(t.steps) ? t.steps.toLocaleString() : "—", "Steps", col("steps"))}${stat(ok(t.debt) ? hm(t.debt) : "—", "Sleep debt")}
     </div>${latest ? `<p class="note">Today is still in progress — strain and steps are running
       totals and keep climbing until midnight.</p>` : ""}</div>
-    ${card("Heart rate", ch.hrIntraday(W, {
+    ${card(`Heart rate<button type="button" class="wo-toggle${showWorkouts ? " on" : ""}" data-wo-toggle aria-pressed="${showWorkouts}"><span class="dot"></span>Workouts</button>`, ch.hrIntraday(W, {
         curve: D.curves[i], drinks: D.drinkTimes[i], hrmax: D.hrmax, rhr: t.rhr,
+        workouts: showWorkouts ? (D.workouts[i] || []) : [],
       }))}
     ${card(`Steps — ${stepsDays} days`, ch.bars(W, D, D.steps, stepsDays, col("steps"), kfmt, "steps"))}
     ${card(`Strain vs target — ${strainDays} days`, ch.strainHistory(W, D, strainDays))}`;
@@ -1011,6 +1018,11 @@ function renderWorkoutDayBody() {
 }
 
 $("dash").addEventListener("click", (e) => {
+  if (e.target.closest?.("[data-wo-toggle]")) {
+    showWorkouts = !showWorkouts;
+    try { localStorage.setItem(WO_KEY, showWorkouts ? "1" : "0"); } catch { /* private mode */ }
+    return renderDay();
+  }
   const b = e.target.closest?.(".kpi[data-detail]");
   if (b) return openDetail(b.dataset.detail);
   const w = e.target.closest?.(".workrow[data-workout-day]");
