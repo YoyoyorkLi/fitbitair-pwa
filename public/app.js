@@ -168,7 +168,7 @@ addEventListener("click", (e) => {
 });
 // Bumped by hand whenever the scrubber changes. Compared against the commit
 // /api/config reports, so a stale cached bundle is visible instead of inferred.
-const BUILD = "readout-in-place";
+const BUILD = "no-ellipsis-readout";
 let dbgBox = null;
 function dbg(line) {
   if (!DBG) return;
@@ -194,7 +194,12 @@ function bandsOf(svgEl) {
 function writeReadout(svgEl, tipText, live) {
   const box = svgEl.closest(".card")?.querySelector(".readout");
   if (!box) return;
-  const parts = String(tipText).split("|");
+  // One <b> for the head, one <span> for everything after it, with the
+  // separators baked into the text. Was one <span> per segment, each drawing
+  // its " * " from a ::before -- see the note in styles.css for why that had
+  // to go.
+  const seg = String(tipText).split("|");
+  const parts = seg.length > 1 ? [seg[0], seg.slice(1).map((t) => " \u00b7 " + t).join("")] : [seg[0]];
 
   // Update the existing nodes IN PLACE instead of destroying and recreating
   // them. A drag calls this on every move -- up to 60x a second -- and the old

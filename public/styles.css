@@ -145,13 +145,25 @@ a{color:var(--accent)}
    so a thumb on the chart is never on top of the number it just asked for.
    Reserves its own line whether or not it is populated — a row that appears on
    touch would shove every chart down the page mid-drag. */
+/* No text-overflow:ellipsis here, and no generated content on the span.
+   Both were paint hazards on iOS, and the device caught them: the ?debug log
+   showed the DOM holding "Aug 28|60.8 ms" while the screen displayed
+   "Aug 28 · 69.7 ms" -- a value from two bands earlier. The date repainted,
+   everything right of it did not.
+   That is the signature of WebKit's ellipsis line-box cache: it computes an
+   ellipsis box for the line, repaints the first inline box on a text change
+   and serves the remainder from the stale cache. The separator being a
+   ::before pseudo-element on precisely the element that failed to repaint
+   made it a second variable, so it is gone too -- the " · " is part of the
+   span's own text now.
+   overflow:hidden stays, so a long readout still clips instead of running
+   under the steppers, and the row keeps its single-line height. */
 .readout{
   min-height:19px;margin:-8px 0 10px;font-size:12.5px;line-height:1.45;
   color:var(--dim);font-variant-numeric:tabular-nums;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;overflow:hidden;
 }
 .readout b{color:var(--muted);font-weight:600}
-.readout span::before{content:" · "}
 .readout.live{color:var(--muted)}
 .readout.live b{color:var(--text)}
 
