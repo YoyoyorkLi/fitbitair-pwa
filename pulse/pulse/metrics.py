@@ -271,6 +271,16 @@ def normalize_sleep(points):
 MAX_SESSION_MIN = 360
 
 
+def _duration_min(s):
+    """Duration string ("1200s") -> minutes. Missing/malformed -> 0.0, not
+    None -- these feed a sum (total zone time), where a hole should count as
+    zero rather than poison the total."""
+    if not isinstance(s, str) or not s.endswith("s"):
+        return 0.0
+    v = _f(s[:-1])
+    return v / 60 if v is not None else 0.0
+
+
 def normalize_exercise(points):
     """Workout sessions -- passively detected by the band, not logged by hand."""
     out = []
@@ -295,12 +305,29 @@ def normalize_exercise(points):
             active_min = span_min
 
         ms = e.get("metricsSummary") or {}
+        # Fitbit's own light/moderate/vigorous/peak classification, not a
+        # Karvonen recomputation of ours -- this is the same split the Fitbit
+        # app's "you spent N minutes in the moderate zone" sentence reads from,
+        # so using it directly means we never disagree with what's on the
+        # user's phone.
+        hrz = ms.get("heartRateZoneDurations") or {}
+        zones = {
+            "light": _duration_min(hrz.get("lightTime")),
+            "moderate": _duration_min(hrz.get("moderateTime")),
+            "vigorous": _duration_min(hrz.get("vigorousTime")),
+            "peak": _duration_min(hrz.get("peakTime")),
+        }
+        dist_mm = _f(ms.get("distanceMillimeters"))
         out.append({
             "start": start, "end": end, "active_min": active_min,
             "type": e.get("exerciseType") or "WORKOUT",
             "calories": _f(ms.get("caloriesKcal")),
             "avg_hr": _f(ms.get("averageHeartRateBeatsPerMinute")),
             "steps": _f(ms.get("steps")),
+            "distance_m": dist_mm / 1000 if dist_mm is not None else None,
+            "pace_s_per_m": _f(ms.get("averagePaceSecondsPerMeter")),
+            "azm": _f(ms.get("activeZoneMinutes")),
+            "zones": zones,
         })
     return sorted(out, key=lambda w: w["start"])
 

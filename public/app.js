@@ -1092,15 +1092,56 @@ function workoutHrCurve(D, i, w) {
   return merged.length ? merged : null;
 }
 
+// Row style and the "you spent N minutes in the moderate zone" phrasing are
+// both lifted from the Google Health app's own workout detail screen --
+// label-left/value-right rows rather than tiles, and a sentence instead of a
+// bar of numbers for zone time. zones is Fitbit's own light/moderate/vigorous/
+// peak split (metrics.py's normalize_exercise, straight from the API's
+// heartRateZoneDurations), not a Karvonen recomputation of ours, so this
+// sentence never disagrees with what the same workout shows in that app.
+const detRow = (label, value) => `<div class="detrow"><span class="dlabel">${label}</span><span class="dvalue">${value}</span></div>`;
+
+function zoneSummary(z) {
+  if (!z) return null;
+  const named = ["moderate", "vigorous", "peak"];
+  const spent = named.filter((k) => z[k] > 0);
+  if (!spent.length) return "This workout stayed in the light zone the whole time.";
+  const said = spent.map((k) => `${z[k]} minute${z[k] === 1 ? "" : "s"} in the ${k} zone`).join(", ");
+  const missed = named.filter((k) => !z[k]);
+  return `You spent ${said}.${missed.length ? ` No time in ${missed.join(" or ")}.` : ""}`;
+}
+
+// "24'33\" /mi" -- averagePaceSecondsPerMeter converted to seconds-per-mile,
+// then to minutes:seconds. Google supplies this directly (not derived from
+// our own duration/distance, which would compound whatever rounding each of
+// those already carries).
+function paceLabel(secPerMeter) {
+  if (!ok(secPerMeter)) return null;
+  const secPerMi = secPerMeter * 1609.344;
+  const m = Math.floor(secPerMi / 60), s = Math.round(secPerMi % 60);
+  return `${m}'${String(s).padStart(2, "0")}" /mi`;
+}
+
 // Collapsed to time/duration/calories -- what you'd want at a glance for
 // every workout that day. Heart rate (the chart, the zone breakdown, the
 // average) only renders once expanded: it's the thing worth a tap, not the
 // thing worth scanning six of in a row.
 function workoutCard(D, i, w, idx) {
   const curve = workoutHrCurve(D, i, w);
-  const zones = ch.zoneMinutes(curve, D.rhr[i], D.hrmax);
   const meta = [`${ch.clock12(ch.mins(w.start))} · ${w.min}m`, w.cal != null ? `${w.cal} cal` : ""]
     .filter(Boolean).join(" · ");
+  const miles = w.dist_m != null ? w.dist_m / 1609.344 : null;
+  const pace = paceLabel(w.pace_s_per_m);
+  const rows = [
+    detRow("Duration", `${w.min}m`),
+    w.cal != null ? detRow("Calories", `${w.cal} cal`) : "",
+    miles != null ? detRow("Distance", `${miles.toFixed(2)} mi`) : "",
+    w.steps != null ? detRow("Steps", w.steps.toLocaleString()) : "",
+    pace ? detRow("Pace", pace) : "",
+    w.avg_hr != null ? detRow("Avg heart rate", `${w.avg_hr} bpm`) : "",
+    w.azm != null ? detRow("Active zone min", `${w.azm} min`) : "",
+  ].filter(Boolean).join("");
+  const zsum = zoneSummary(w.zones);
   return `<div class="card">
     <button type="button" class="wsummary" data-wtoggle="${idx}" aria-expanded="false" aria-controls="wexpand-${idx}">
       <span class="wtype">${titleCase(w.type)}</span>
@@ -1108,11 +1149,10 @@ function workoutCard(D, i, w, idx) {
       <span class="wchev">›</span>
     </button>
     <div class="wexpand" id="wexpand-${idx}" hidden>
+      <div class="detlist">${rows}</div>
       <div class="readrow"><p class="readout" aria-live="polite"></p>${stepper}</div>
       <div class="chartbox scrubbable">${ch.hrIntraday(W, { curve, hrmax: D.hrmax, rhr: D.rhr[i] })}</div>
-      ${zones ? `<div class="stats" style="grid-template-columns:repeat(5,1fr);margin-top:14px">
-        ${[0, 1, 2, 3, 4].map((z) => stat(zones[z] + "m", "Z" + (z + 1), z ? ZONE[z] : null)).join("")}</div>` : ""}
-      ${w.avg_hr != null ? `<p class="note">${w.avg_hr} bpm average</p>` : ""}
+      ${zsum ? `<p class="note">${zsum}</p>` : ""}
     </div>
   </div>`;
 }

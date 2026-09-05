@@ -238,12 +238,21 @@ def _daily_workouts(con):
     out = {}
     for w in mx.normalize_exercise(ingest.load("exercise", con)):
         d = w["start"].date()
+        zones = w["zones"]
         out.setdefault(d, []).append({
             "type": w["type"],
             "start": w["start"].strftime("%H:%M"),
             "min": int(round(w["active_min"])),
             "cal": int(round(w["calories"])) if w["calories"] is not None else None,
             "avg_hr": int(round(w["avg_hr"])) if w["avg_hr"] is not None else None,
+            "steps": int(round(w["steps"])) if w["steps"] is not None else None,
+            "dist_m": round(w["distance_m"], 1) if w["distance_m"] is not None else None,
+            "pace_s_per_m": round(w["pace_s_per_m"], 3) if w["pace_s_per_m"] is not None else None,
+            "azm": int(round(w["azm"])) if w["azm"] is not None else None,
+            # Minutes, rounded -- only worth sending if the session actually
+            # spent time somewhere. None rather than a dict of zeros makes the
+            # front end's "no zone data" fallback trivial to check for.
+            "zones": ({k: round(v) for k, v in zones.items()} if any(zones.values()) else None),
         })
     return out
 

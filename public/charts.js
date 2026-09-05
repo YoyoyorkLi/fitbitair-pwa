@@ -341,27 +341,6 @@ function bucket(pts, size = BUCKET_MIN) {
   return out;
 }
 
-// Minutes spent in each Karvonen zone across an arbitrary curve slice -- same
-// edges hrIntraday draws its background bands from below, and the same Z1
-// "no floor" convention day_strain() uses server-side (metrics.py): Z1 is
-// everything under the 60%-HRR line, not just readings between rhr and it.
-// Each curve point already represents one minute (push.py stores hr_curve at
-// one-minute resolution), so counting points is counting minutes -- no
-// timestamps to diff.
-export function zoneMinutes(curve, rhr, hrmax) {
-  if (!curve?.length || !ok(rhr) || !ok(hrmax)) return null;
-  const res = hrmax - rhr;
-  const edges = [0, 0.6, 0.7, 0.8, 0.9, 1].map((f) => rhr + res * f);
-  edges[0] = 0;
-  const mins = [0, 0, 0, 0, 0];
-  for (const [, bpm] of curve) {
-    let z = 4;
-    for (let k = 0; k < 4; k++) { if (bpm < edges[k + 1]) { z = k; break; } }
-    mins[z]++;
-  }
-  return mins;
-}
-
 /**
  * One civil day of heart rate, with Karvonen zone bands and drink markers.
  *

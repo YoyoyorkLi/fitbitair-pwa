@@ -197,6 +197,17 @@ a{color:var(--accent)}
 .wsummary .wchev{color:var(--dim);font-size:16px;line-height:1;width:14px;text-align:center}
 .wexpand{margin-top:16px}
 
+/* label-left/value-right rows, lifted from the Google Health app's own
+   workout detail screen -- a list reads better than tiles for a set of
+   stats that varies by workout type (a walk has distance and pace, a
+   weights session has neither). */
+.detlist{margin-bottom:16px}
+.detrow{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  padding:9px 0;border-bottom:1px solid var(--grid)}
+.detrow:last-child{border-bottom:0}
+.detrow .dlabel{color:var(--muted);font-size:13.5px}
+.detrow .dvalue{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums}
+
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .stat{background:var(--panel2);border-radius:5px;padding:16px 8px;text-align:center}
 .stat .v{font-size:25px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15}
