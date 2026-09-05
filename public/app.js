@@ -154,13 +154,17 @@ function bindTips(root) {
 // the home-screen app launches at start_url ("/") with no address bar, so the
 // query string is unreachable, and its storage is a separate partition from
 // Safari's (see the sign-in note in index.html), so a flag set in the browser
-// does not carry across either. Five taps on the wordmark, then.
+// does not carry across either. Five taps on the date stamp, then -- it used
+// to be the "Pulse" wordmark, retired for being visual clutter with no other
+// job; the stamp is the next thing in the header that is always present and
+// always tappable, and it already tells taps apart by count/timing for its
+// own single-tap behaviour, so a second listener here costs nothing.
 const DBG_KEY = "pulse-debug";
 const stickyDbg = () => { try { return localStorage.getItem(DBG_KEY) === "1"; } catch { return false; } };
 let DBG = new URLSearchParams(location.search).has("debug") || stickyDbg();
 let brandTaps = 0, brandTimer = null;
 addEventListener("click", (e) => {
-  if (!e.target.closest?.(".brand")) return;
+  if (!e.target.closest?.("#stamp")) return;
   clearTimeout(brandTimer);
   brandTimer = setTimeout(() => { brandTaps = 0; }, 2000);
   if (++brandTaps < 5) return;
@@ -926,9 +930,9 @@ function renderDay() {
 
   $("today").innerHTML = `
     <div class="kpis">
-      ${kpi(ch.gauge(t.strain, 21, col("strain"), "Day strain", `Day strain ${t.strain} of 21|Banister TRIMP over every sample, log-compressed`), "Day strain", "target 12.6–15.6", "strain")}
+      ${kpi(ch.gauge(t.strain, 21, col("strain"), "Day Strain", `Day Strain ${t.strain} of 21|Banister TRIMP over every sample, log-compressed`), "Day Strain", "target 12.6–15.6", "strain")}
       ${kpi(ch.ring(t.recovery, recCol, "Recovery", `Recovery ${t.recovery}|55% HRV · 25% resting HR · 20% sleep`), "Recovery", t.recovery >= 67 ? "well recovered" : t.recovery >= 34 ? "moderate" : "low", "recovery")}
-      ${kpi(ch.ring(t.score, ok(t.score) && t.score >= 80 ? col("good") : col("awake"), "Sleep score", ok(t.score) ? `Sleep score ${t.score}|${hm(t.asleep)} asleep of ${hm(t.need)} needed` : "No sleep recorded|this night has not been scored"), "Sleep score", ok(t.asleep) ? hm(t.asleep) : "not yet", "sleep")}
+      ${kpi(ch.ring(t.score, ok(t.score) && t.score >= 80 ? col("good") : col("awake"), "Sleep Score", ok(t.score) ? `Sleep Score ${t.score}|${hm(t.asleep)} asleep of ${hm(t.need)} needed` : "No sleep recorded|this night has not been scored"), "Sleep Score", ok(t.asleep) ? hm(t.asleep) : "not yet", "sleep")}
     </div>
     ${strip}
     <div class="card"><div class="stats">
@@ -953,7 +957,7 @@ function renderDay() {
 // Each Day-tab dial opens onto the charts that actually explain its number,
 // instead of sending you hunting across the Day and Trends tabs for them --
 // this is also where the old standalone Sleep tab's charts now live.
-const DETAIL_TITLE = { strain: "Day strain", recovery: "Recovery", sleep: "Sleep score" };
+const DETAIL_TITLE = { strain: "Day Strain", recovery: "Recovery", sleep: "Sleep Score" };
 let detailKind = null;   // re-rendered by renderDay() above whenever open, so a sync or resize can't leave it stale
 
 function openDetail(kind) {
@@ -1013,7 +1017,7 @@ function renderDetailBody(kind) {
     const strainDays = win(D, 21, 10), stepsDays = win(D, 30, 14);
     const workouts = D.workouts[i] || [];
     return `
-      <div class="detail-dial">${ch.gauge(t.strain, 21, col("strain"), "Day strain", `Day strain ${t.strain} of 21|Banister TRIMP over every sample, log-compressed`)}</div>
+      <div class="detail-dial">${ch.gauge(t.strain, 21, col("strain"), "Day Strain", `Day Strain ${t.strain} of 21|Banister TRIMP over every sample, log-compressed`)}</div>
       <p class="note center">target <b>12.6–15.6</b>${ok(t.steps) ? ` · <b>${t.steps.toLocaleString()}</b> steps` : ""}</p>
       ${card(`Strain vs target — ${strainDays} days`, ch.strainHistory(W, D, strainDays))}
       ${card("Workouts", workouts.length
@@ -1038,7 +1042,7 @@ function renderDetailBody(kind) {
       ${card(`Recovery — ${trendDays} days`, ch.sparkline(W, D, D.recovery, recCol, trendDays, ""))}
       ${card(`HRV (rMSSD) — ${trendDays} days`, ch.sparkline(W, D, D.hrv, col("accent"), trendDays, "ms"))}
       ${card(`Resting heart rate — ${trendDays} days`, ch.sparkline(W, D, D.rhr, col("warn"), trendDays, "bpm"))}
-      ${card(`Sleep score — ${trendDays} nights`, ch.sparkline(W, D, D.score, col("rem"), trendDays, ""))}`;
+      ${card(`Sleep Score — ${trendDays} nights`, ch.sparkline(W, D, D.score, col("rem"), trendDays, ""))}`;
   }
 
   // sleep — same "last slept night" fallback renderDay() used to, back when
@@ -1052,11 +1056,11 @@ function renderDetailBody(kind) {
   return `
     ${slept ? "" : `<div class="banner">No sleep recorded for <b>${t.night}</b> — showing the night of
       <b>${sn.night ?? "the last full night"}</b>.</div>`}
-    <div class="detail-dial">${ch.ring(sn.score, ok(sn.score) && sn.score >= 80 ? col("good") : col("awake"), "Sleep score", ok(sn.score) ? `Sleep score ${sn.score}|${hm(sn.asleep)} asleep of ${hm(sn.need)} needed` : "No sleep recorded|this night has not been scored")}</div>
+    <div class="detail-dial">${ch.ring(sn.score, ok(sn.score) && sn.score >= 80 ? col("good") : col("awake"), "Sleep Score", ok(sn.score) ? `Sleep Score ${sn.score}|${hm(sn.asleep)} asleep of ${hm(sn.need)} needed` : "No sleep recorded|this night has not been scored")}</div>
     <p class="note center">${ok(sn.asleep) ? `<b>${hm(sn.asleep)}</b> asleep of <b>${hm(sn.need)}</b> needed` : "not yet scored"}</p>
     <div class="card"><div class="stats">
       ${stat(ok(sn.asleep) ? hm(sn.asleep) : "—", "Asleep")}${stat(ok(sn.eff) ? sn.eff + "%" : "—", "Efficiency")}
-      ${stat(ok(sn.need) ? hm(sn.need) : "—", "Needed")}${stat(ok(sn.score) ? sn.score : "—", "Sleep score", sn.score >= 80 ? col("good") : col("awake"))}
+      ${stat(ok(sn.need) ? hm(sn.need) : "—", "Needed")}${stat(ok(sn.score) ? sn.score : "—", "Sleep Score", sn.score >= 80 ? col("good") : col("awake"))}
     </div></div>
     ${card("Hypnogram", ch.hypnogram(W, hyp))}
     ${card("Heart rate during sleep", ch.hrIntraday(W, { curve: sleepHrCurve(D, sIdx, hyp), hrmax: D.hrmax, rhr: sn.rhr }))}
@@ -1105,7 +1109,7 @@ function renderTrendCharts(D, days) {
     ${card(`HRV (rMSSD) — ${days} days`, ch.sparkline(W, D, D.hrv, col("accent"), days, "ms"))}
     ${card(`Resting heart rate — ${days} days`, ch.sparkline(W, D, D.rhr, col("warn"), days, "bpm"))}
     ${card(`Steps — ${days} days`, ch.bars(W, D, D.steps, days, col("steps"), kfmt, "steps"))}
-    ${card(`Sleep score — ${days} nights`, ch.sparkline(W, D, D.score, col("rem"), days, ""))}`;
+    ${card(`Sleep Score — ${days} nights`, ch.sparkline(W, D, D.score, col("rem"), days, ""))}`;
   primeReadouts($("trend-cards"));
 }
 

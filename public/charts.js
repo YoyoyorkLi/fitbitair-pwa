@@ -26,6 +26,14 @@
 // `data-scrub` on the <svg> plus `rect[data-i]` hit bands get the drag
 // scrubber (see bindScrub in app.js) — that is the touch story, since hover
 // does not exist on a phone.
+//
+// For a scrub band specifically: put the VALUE first, whatever's being
+// scrubbed to find (a number, a duration, a stage name) — writeReadout in
+// app.js renders segment 0 as the big bold headline. Everything after the
+// first "|" is context (date, time, drink count) and renders small, in one
+// trailing line. Getting this backwards is easy to miss reading one chart in
+// isolation -- it only becomes obvious once you're scrubbing and the biggest
+// thing on screen is the date.
 
 const CSS = getComputedStyle(document.documentElement);
 export const col = (n) => CSS.getPropertyValue("--" + n).trim();
@@ -278,7 +286,7 @@ export function hypnogram(W, h, ht = 244) {
     const name = STAGE_NAME[seg.t] || seg.t;
     p += `<rect data-i="${i}" data-x="${X(m).toFixed(1)}" data-y="${(Y(LEVEL[seg.t]) + bar / 2).toFixed(1)}"
       x="${(X(m) - bw / 2).toFixed(1)}" y="${padT}" width="${bw.toFixed(1)}" height="${ih.toFixed(1)}"
-      fill="transparent" data-tip="${esc(`${name} · ${clock(m)}|${dur(seg.b - seg.a)} block · ${clock(seg.a)}–${clock(seg.b)}`)}"/>`;
+      fill="transparent" data-tip="${esc(`${name} · ${dur(seg.b - seg.a)}|${clock(seg.a)} – ${clock(seg.b)}`)}"/>`;
   }
   p += scrubLayer(padT, padT + ih);
   return svg(W, ht, p, "Sleep stages across the night with cycle markers and the heart-rate floor", "time");
@@ -432,7 +440,7 @@ export function bars(W, D, vals, days, color, fmt, unit) {
   p += axis(x0, x1, y1) + mk;
   p += hits(n, s, y0, y1 + 20, (i) => {
     const d = D.drinks[i0 + i];
-    return `${dlabel(D.dates[i0 + i])}|${ok(v[i]) ? Math.round(v[i]).toLocaleString() + " " + unit : "no data"}${d ? `|${d} drink${d > 1 ? "s" : ""}` : ""}`;
+    return `${ok(v[i]) ? Math.round(v[i]).toLocaleString() + " " + unit : "no data"}|${dlabel(D.dates[i0 + i])}${d ? `|${d} drink${d > 1 ? "s" : ""}` : ""}`;
   }, (i) => (ok(v[i]) ? s.y(v[i]) : null));
   p += [0, hi / 2, hi].map((x) => txt(x0 - 8, s.y(x) + 4, fmt(x))).join("");
   p += dateAxis(W, D.dates, i0, n, s, h - 8);
@@ -468,8 +476,8 @@ export function strainHistory(W, D, days) {
   const p = grid(x0, x1, [y0, (y0 + y1) / 2, y1]) + band + bar + axis(x0, x1, y1) + mk +
     hits(n, s, y0, y1 + 20, (i) => {
       const j = i0 + i;
-      if (j < 0 || !ok(D.strain[j])) return `${j < 0 ? "—" : dlabel(D.dates[j])}|no strain recorded`;
-      return `${dlabel(D.dates[j])}|strain ${D.strain[j]} · target ${D.target_lo[j]}–${D.target_hi[j]}${D.drinks[j] ? `|${D.drinks[j]} drinks` : ""}`;
+      if (j < 0 || !ok(D.strain[j])) return `no data|${j < 0 ? "—" : dlabel(D.dates[j])}`;
+      return `${D.strain[j]}|${dlabel(D.dates[j])} · target ${D.target_lo[j]}–${D.target_hi[j]}${D.drinks[j] ? `|${D.drinks[j]} drinks` : ""}`;
     }, (i) => (ok(D.strain[i0 + i]) ? s.y(D.strain[i0 + i]) : null)) +
     [0, hi / 2, hi].map((v) => txt(x0 - 7, s.y(v) + 4, v.toFixed(0))).join("") +
     dateAxis(W, D.dates, i0, n, s, h - 8) + scrubLayer(y0, y1);
@@ -515,7 +523,7 @@ export function debtArea(W, D, days) {
     `<polygon points="${x0},${y1} ${line} ${x1},${y1}" fill="${col("rem")}" opacity=".22"/>
      <polyline points="${line}" fill="none" stroke="${col("rem")}" stroke-width="2" stroke-linejoin="round"/>` +
     axis(x0, x1, y1) +
-    hits(n, s, y0, y1, (i) => `${dlabel(D.dates[i0 + i])}|${hm(v[i])} of debt`, (i) => s.y(v[i])) +
+    hits(n, s, y0, y1, (i) => `${hm(v[i])} of debt|${dlabel(D.dates[i0 + i])}`, (i) => s.y(v[i])) +
     // Hours only in the gutter: "12h 00m" needs 44px of a 270px chart, and the
     // half-hour was never the point of a debt trend.
     [0, hi / 2, hi].map((x) => txt(x0 - 7, s.y(x) + 4, Math.round(x / 60) + "h")).join("") +
@@ -542,8 +550,8 @@ export function sleepColumns(W, D, days) {
   p += axis(x0, x1, y1);
   p += hits(n, s, y0, y1 + 20, (i) => {
     const j = i0 + i;
-    if (j < 0 || !ok(D.asleep[j])) return `${j < 0 ? "—" : dlabel(D.dates[j])}|no sleep recorded`;
-    return `${dlabel(D.dates[j])} · ${hm(D.asleep[j])}|REM ${hm(D.rem[j])} · deep ${hm(D.deep[j])}${D.drinks[j] ? `|${D.drinks[j]} drinks` : ""}`;
+    if (j < 0 || !ok(D.asleep[j])) return `no data|${j < 0 ? "—" : dlabel(D.dates[j])}`;
+    return `${hm(D.asleep[j])}|${dlabel(D.dates[j])} · REM ${hm(D.rem[j])} · deep ${hm(D.deep[j])}${D.drinks[j] ? `|${D.drinks[j]} drinks` : ""}`;
   });
   p += [0, 4, 8, 12].map((hh) => txt(x0 - 8, s.y(hh * 60) + 4, hh + "h")).join("");
   p += dateAxis(W, D.dates, i0, n, s, h - 8) + scrubLayer(y0, y1);
@@ -568,7 +576,7 @@ export function sparkline(W, D, vals, color, days, unit) {
     axis(x0, x1, y1) +
     hits(n, s, y0, y1, (i) => {
       const j = i0 + i;
-      return `${dlabel(D.dates[j])}|${ok(v[i]) ? v[i] + " " + unit : "no data"}${D.drinks[j] ? `|after ${D.drinks[j]} drinks` : ""}`;
+      return `${ok(v[i]) ? v[i] + " " + unit : "no data"}|${dlabel(D.dates[j])}${D.drinks[j] ? `|after ${D.drinks[j]} drinks` : ""}`;
     }, (i) => (ok(v[i]) ? s.y(v[i]) : null)) +
     // The unit rides on the top label only; repeating "ms" three times down a
     // 270px gutter is noise, and the card title already says what this is.
