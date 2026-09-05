@@ -421,11 +421,23 @@ function primeReadouts(root) {
 // Secondary to the ‹ › buttons, never the only way to do anything. Deliberately
 // strict: 64px of travel and twice as much horizontal as vertical, or a thumb
 // drifting during a normal scroll would throw you onto another night.
+// A detail screen is mostly scrub charts (every trend line, the hypnogram,
+// the bars) -- excluding svg[data-scrub] below means an ordinary swipe over
+// almost any of it never reaches this handler at all, it just scrubs the
+// chart underneath the finger. Restricting the close-swipe to a touch that
+// STARTS within this many px of the left edge sidesteps the conflict rather
+// than trying to out-arbitrate it: .detail's own padding (16px) plus every
+// .card's (18px) already keeps chart content clear of this margin, so nothing
+// exclusive to charts is ever within it, and it mirrors the system edge-back
+// gesture every phone user already has muscle memory for.
+const CLOSE_EDGE_PX = 28;
+
 function bindSwipe(root) {
   let sx = 0, sy = 0, sTop = 0, sDTop = 0, live = false;
   root.addEventListener("pointerdown", (e) => {
     if (e.pointerType === "mouse") return;
     if (e.target.closest?.("svg[data-scrub], button, a, input")) return;
+    if (!$("detail").hidden && e.clientX > CLOSE_EDGE_PX) return;
     sx = e.clientX; sy = e.clientY; sTop = scrollY; sDTop = $("detail").scrollTop; live = true;
   });
   // iOS hands a gesture to its own scroller and CANCELS our pointer rather than
@@ -1008,7 +1020,7 @@ function renderDetailBody(kind) {
     return `
       <div class="detail-dial">${ch.ring(t.recovery, recCol, "Recovery", `Recovery ${t.recovery}|55% HRV · 25% resting HR · 20% sleep`)}</div>
       <p class="note center">55% HRV · 25% resting heart rate · 20% sleep score, each against your
-        rolling baseline${ok(hrvPct) ? ` — HRV is <b>${hrvPct}%</b> of yours` : ""}</p>
+        rolling baseline${ok(hrvPct) ? ` — HRV is <b>${hrvPct}%</b> of yours` : ""}.</p>
       ${card(`Recovery — ${trendDays} days`, ch.sparkline(W, D, D.recovery, recCol, trendDays, ""))}
       ${card(`HRV (rMSSD) — ${trendDays} days`, ch.sparkline(W, D, D.hrv, col("accent"), trendDays, "ms"))}
       ${card(`Resting heart rate — ${trendDays} days`, ch.sparkline(W, D, D.rhr, col("warn"), trendDays, "bpm"))}

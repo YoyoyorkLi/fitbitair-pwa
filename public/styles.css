@@ -209,7 +209,7 @@ a{color:var(--accent)}
    a full-screen detail has nothing beside it -- at 220px in a ~340px-wide
    phone it read as a small ring adrift in a lot of empty margin rather than
    as the hero of the screen it now is. */
-.detail-dial{display:flex;justify-content:center;margin:10px 0 8px}
+.detail-dial{display:flex;justify-content:center;margin:10px 0 20px}
 .detail-dial svg{width:100%;max-width:280px;height:auto}
 /* margin-bottom is the fix here, not margin-top: .note is 0-bottom by
    default (the usual case is a caption sitting flush above the next .card's
