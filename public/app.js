@@ -168,7 +168,7 @@ addEventListener("click", (e) => {
 });
 // Bumped by hand whenever the scrubber changes. Compared against the commit
 // /api/config reports, so a stale cached bundle is visible instead of inferred.
-const BUILD = "no-ellipsis-readout";
+const BUILD = "scrubber-fixed";
 let dbgBox = null;
 function dbg(line) {
   if (!DBG) return;
@@ -219,15 +219,6 @@ function writeReadout(svgEl, tipText, live) {
     if (el.textContent !== parts[i]) el.textContent = parts[i];
   }
   box.classList.toggle("live", !!live);
-
-  // What the DOM actually ended up holding, logged only when the tip changes.
-  // If a recording ever again shows a stale number on screen, this says
-  // whether the string was wrong (our bug) or right (a paint bug) -- which is
-  // the question the last round could not answer.
-  if (DBG && box.dataset.last !== tipText) {
-    box.dataset.last = tipText;
-    dbg(`readout <- ${tipText}  ||  shows "${box.textContent}"`);
-  }
 }
 
 function setScrub(svgEl, idx, live = true) {
@@ -259,7 +250,6 @@ function scrubAt(svgEl, clientX) {
   const ux = ((clientX - r.left) / r.width) * svgEl.viewBox.baseVal.width;
   let best = 0, bd = Infinity;
   svgEl._xs.forEach((x, i) => { const d = Math.abs(x - ux); if (d < bd) { bd = d; best = i; } });
-  dbg(`scrubAt ux=${ux.toFixed(0)} -> band ${best}/${bands.length}`);
   setScrub(svgEl, best);
 }
 
@@ -273,6 +263,7 @@ function bindScrub(root) {
   let drag = null, sx = 0, sy = 0, lx = 0, ly = 0;
   let nPointer = 0, nTouch = 0;          // per-gesture, reset on every start
   let gesture = false;                   // did this touch start on a chart?
+  let what = "";                         // which chart, for the one log line
 
   // Consume BOTH event streams instead of betting on one. scrubAt is
   // idempotent, so being driven twice for one movement costs a redundant index
@@ -298,6 +289,7 @@ function bindScrub(root) {
   // and became a bug. Nothing about iOS was ever broken.
   const begin = (svgEl, x, y) => {
     drag = svgEl; sx = lx = x; sy = ly = y; gesture = true;
+    if (DBG) what = `${svgEl.dataset.scrub}/${bandsOf(svgEl).length}`;
     nPointer = 0; nTouch = 0;            // reset HERE, not at the end -- the
     scrubAt(svgEl, x);                   // previous version counted the moves
   };                                     // of the gesture before this one
@@ -308,15 +300,17 @@ function bindScrub(root) {
     scrubAt(drag, x);
   };
 
-  // Logs EVERY gesture that started on a chart, not just the ones that still
-  // held a drag at the end. The old guard was `if (drag)`, and the axis
-  // release above set drag to null -- so the only gestures that could ever
-  // reach this line were the ones with no movement in them. "pointermoves=0"
-  // was a tautology printed by taps, and it is what sent eight fixes hunting
-  // for a platform that was never withholding anything.
+  // The one diagnostic worth keeping. It logs EVERY gesture that started on a
+  // chart, not just the ones still holding a drag at the end -- the old guard
+  // was `if (drag)`, and the axis rule that used to live here set drag to
+  // null, so the only gestures that could reach this line were the ones with
+  // no movement in them. "pointermoves=0" was a tautology printed by taps, and
+  // it is what sent eight fixes hunting a platform that was working fine.
+  // A log that can only report the outcome it is looking for is worse than no
+  // log, so this one reports every gesture and the distance it actually moved.
   const end = (why) => {
     if (gesture) {
-      dbg(`${why}: moves p=${nPointer} t=${nTouch} ` +
+      dbg(`${why}: ${what} moves p=${nPointer} t=${nTouch} ` +
           `travel dx=${(lx - sx) | 0} dy=${(ly - sy) | 0} ${CTX}`);
     }
     gesture = false; drag = null;
@@ -324,10 +318,8 @@ function bindScrub(root) {
 
   root.addEventListener("pointerdown", (e) => {
     const s = e.target.closest?.("svg[data-scrub]");
-    if (!s) return;                       // touches that miss a chart are not
-    dbg(`pointerdown(${e.pointerType}) -> ` +   // interesting: hit-testing was
-        `${s.dataset.scrub}, ${s.querySelectorAll("rect[data-i]").length} bands`);
-    begin(s, e.clientX, e.clientY);       // measured correct at 9 points/chart
+    if (!s) return;
+    begin(s, e.clientX, e.clientY);
   });
 
   addEventListener("pointermove", (e) => {
@@ -375,7 +367,6 @@ function bindScrub(root) {
     if (e.cancelable) e.preventDefault();
     if (drag) return;                     // pointerdown already handled it
     const t = e.changedTouches[0];
-    dbg(`touchstart (no pointerdown) -> ${s.dataset.scrub}`);
     begin(s, t.clientX, t.clientY);
   }, { passive: false });
 
@@ -671,7 +662,6 @@ function lastSleptNight(D, upto) {
 
 // ------------------------------------------------------------------- render
 let bound = false;
-let reported = false;
 function render() {
   show("dash");
   W = chartWidth();
@@ -686,14 +676,6 @@ function render() {
     bindScrub($("dash"));
     bindSwipe($("dash"));
     watchWidth();
-  }
-  // The visible proof that the new bundle is the one running: old code renders
-  // no steppers at all, so "0" here and "BUILD ..." above disagree only if the
-  // HTML and the JS came from different deploys.
-  if (DBG && !reported) {
-    reported = true;
-    dbg(`rendered: ${document.querySelectorAll(".step").length} stepper buttons, ` +
-        `${document.querySelectorAll("svg[data-scrub]").length} scrub charts`);
   }
 }
 
