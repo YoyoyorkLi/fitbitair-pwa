@@ -1092,23 +1092,33 @@ function workoutHrCurve(D, i, w) {
   return merged.length ? merged : null;
 }
 
-// Row style and the "you spent N minutes in the moderate zone" phrasing are
-// both lifted from the Google Health app's own workout detail screen --
-// label-left/value-right rows rather than tiles, and a sentence instead of a
-// bar of numbers for zone time. zones is Fitbit's own light/moderate/vigorous/
-// peak split (metrics.py's normalize_exercise, straight from the API's
-// heartRateZoneDurations), not a Karvonen recomputation of ours, so this
-// sentence never disagrees with what the same workout shows in that app.
+// Row style and the zone bars are both lifted from the Google Health app's
+// own workout detail screen -- label-left/value-right rows rather than
+// tiles, and a bar per zone (Peak down to Light) instead of a sentence.
+// `zones` is Fitbit's own light/moderate/vigorous/peak split
+// (metrics.py's normalize_exercise, straight from the API's
+// heartRateZoneDurations), not a Karvonen recomputation of ours, so the
+// PERCENTAGES here never disagree with what the same workout shows in that
+// app -- only the chart's zone coloring above is an approximation (see
+// zoneEdges4 in charts.js), because this project has no access to Fitbit's
+// own personalized thresholds.
 const detRow = (label, value) => `<div class="detrow"><span class="dlabel">${label}</span><span class="dvalue">${value}</span></div>`;
 
-function zoneSummary(z) {
-  if (!z) return null;
-  const named = ["moderate", "vigorous", "peak"];
-  const spent = named.filter((k) => z[k] > 0);
-  if (!spent.length) return "This workout stayed in the light zone the whole time.";
-  const said = spent.map((k) => `${z[k]} minute${z[k] === 1 ? "" : "s"} in the ${k} zone`).join(", ");
-  const missed = named.filter((k) => !z[k]);
-  return `You spent ${said}.${missed.length ? ` No time in ${missed.join(" or ")}.` : ""}`;
+const ZONE_ORDER = [["Peak", "peak", 3], ["Vigorous", "vigorous", 2], ["Moderate", "moderate", 1], ["Light", "light", 0]];
+
+function zoneBars(z) {
+  if (!z) return "";
+  const total = z.light + z.moderate + z.vigorous + z.peak;
+  if (!total) return "";
+  return `<div class="zonebars">
+    ${ZONE_ORDER.map(([label, key, ci]) => {
+      const pct = Math.round((z[key] / total) * 100);
+      return `<div class="zonebar">
+        <p class="zlabel">${label} · ${pct}% · ${z[key]} min</p>
+        <div class="ztrack"><div class="zfill" style="width:${pct}%;background:${ch.WZONE[ci]}"></div></div>
+      </div>`;
+    }).join("")}
+  </div>`;
 }
 
 // "24'33\" /mi" -- averagePaceSecondsPerMeter converted to seconds-per-mile,
@@ -1141,7 +1151,6 @@ function workoutCard(D, i, w, idx) {
     w.avg_hr != null ? detRow("Avg heart rate", `${w.avg_hr} bpm`) : "",
     w.azm != null ? detRow("Active zone min", `${w.azm} min`) : "",
   ].filter(Boolean).join("");
-  const zsum = zoneSummary(w.zones);
   return `<div class="card">
     <button type="button" class="wsummary" data-wtoggle="${idx}" aria-expanded="false" aria-controls="wexpand-${idx}">
       <span class="wtype">${titleCase(w.type)}</span>
@@ -1151,8 +1160,8 @@ function workoutCard(D, i, w, idx) {
     <div class="wexpand" id="wexpand-${idx}" hidden>
       <div class="detlist">${rows}</div>
       <div class="readrow"><p class="readout" aria-live="polite"></p>${stepper}</div>
-      <div class="chartbox scrubbable">${ch.hrIntraday(W, { curve, hrmax: D.hrmax, rhr: D.rhr[i] })}</div>
-      ${zsum ? `<p class="note">${zsum}</p>` : ""}
+      <div class="chartbox scrubbable">${ch.hrIntraday(W, { curve, hrmax: D.hrmax, rhr: D.rhr[i], zoned: true })}</div>
+      ${zoneBars(w.zones)}
     </div>
   </div>`;
 }

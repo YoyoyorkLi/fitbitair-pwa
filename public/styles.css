@@ -208,6 +208,14 @@ a{color:var(--accent)}
 .detrow .dlabel{color:var(--muted);font-size:13.5px}
 .detrow .dvalue{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums}
 
+/* Zone bars, same idiom as the Google Health app's own "Time in each zone" --
+   a track per zone, filled to that zone's share of the workout, Peak down to
+   Light so the bar you're most likely to care about is the first one. */
+.zonebars{display:flex;flex-direction:column;gap:14px;margin-top:18px}
+.zonebar .zlabel{font-size:13px;font-weight:600;margin:0 0 7px}
+.ztrack{background:var(--panel2);border-radius:999px;height:10px;overflow:hidden}
+.zfill{height:100%;border-radius:999px}
+
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .stat{background:var(--panel2);border-radius:5px;padding:16px 8px;text-align:center}
 .stat .v{font-size:25px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15}
