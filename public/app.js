@@ -551,6 +551,33 @@ function normalize(D) {
   D.lastDrink ??= only(D.last_drink ? new Date(D.last_drink) : null);
   D.workouts ??= only(D.workout_list || []).map((v) => v || []);
   for (const k of ["inBed", "need", "hrvBaseline"]) D[k] ??= [];
+  return trimInProgressNight(D);
+}
+
+// night_summary FULL OUTER JOINs nights with drinks (schema.sql), so a night
+// still in progress -- drinks already logged tonight, no nights row synced
+// yet -- shows up as the newest row in D.dates with every n.* column null.
+// Left in place, that row silently becomes "the latest night" everywhere:
+// the Day tab defaults onto a blank dashboard, the Workouts/Drinks calendars
+// default to browsing a month that may not even be this one, "latest" stops
+// matching D.dates.length - 1 so the pastbar wrongly reads "tap for latest"
+// on the actual latest real night, and every trend chart grows a trailing
+// empty day. Dropping it here, once, at the source fixes all of those at
+// once instead of teaching each of them to recognize it individually.
+// Nothing is lost: the Drinks tab gets tonight's count from the drinks
+// table directly, keyed by civil day (see loadLive()'s drinkRows comment),
+// not from this per-night rollup -- so tonight's drinks still show up
+// under today's own, now-real row.
+function trimInProgressNight(D) {
+  const last = D.dates.length - 1;
+  if (last <= 0 || ok(D.strain[last])) return D;
+  for (const k of ["dates", "hrv", "rhr", "rem", "deep", "light", "awake", "asleep",
+                   "inBed", "need", "hrvBaseline", "debt", "score", "recovery", "strain",
+                   "steps", "drinks", "target_lo", "target_hi", "curves", "hypnos",
+                   "workouts", "drinkTimes", "drinkRows", "firstDrink", "lastDrink"]) {
+    if (Array.isArray(D[k])) D[k].pop();
+  }
+  D.z.forEach((zone) => zone.pop());
   return D;
 }
 
@@ -604,42 +631,46 @@ async function loadLive() {
     workouts: data.map((r) => (Array.isArray(r.workouts) ? r.workouts : [])),
     drinkTimes: data.map(() => []),
     drinkRows: data.map(() => []),
-    // For the "heart rate while drinking" chart on #drinks-day -- night_summary
-    // already aggregates these per night, so no extra query needed for them.
-    firstDrink: data.map((r) => (r.first_drink ? new Date(r.first_drink) : null)),
-    lastDrink: data.map((r) => (r.last_drink ? new Date(r.last_drink) : null)),
+    firstDrink: data.map(() => null),
+    lastDrink: data.map(() => null),
   };
 
   // One query for every drink in the window rather than one per night visited.
   // A heavy night is ~8 rows, so 45 nights is a couple of hundred at worst --
   // cheaper in one round trip than in a fetch each time you press ‹.
-  // Two different groupings out of the same rows:
-  //   byDay   the CIVIL DAY each drink happened on -- hr_curve is one
-  //           midnight-to-midnight day, so a session that runs 9pm to 1am has
-  //           its markers split across two consecutive charts (drinkTimes).
-  //   byNight the drink's own `night` column -- what #drinks-day lists and
-  //           edits, since that is the bucket "5 drinks the night before"
-  //           and the dose-response count are already both scoped to.
   //
-  // One day earlier than the first row: a drink at 1am on dates[0] carries the
-  // night key of the day before, so a gte on dates[0] would miss it.
+  // Grouped by the CIVIL DAY each drink happened on, not by its drinking-
+  // night key (D.drinks above stays night-keyed on purpose -- that is what
+  // the dose-response fit and "N drinks the night before" are actually
+  // scoped to, and this would be a second, disagreeing definition of the
+  // same number if it changed too). Two reasons civil day is right here:
+  // hr_curve is one midnight-to-midnight day, so a session that runs 9pm to
+  // 1am needs its markers split across two consecutive charts anyway; and
+  // the Drinks tab is a calendar, which IS a civil-day concept -- a drink
+  // logged tonight, before tonight's own night_summary row exists, should
+  // show up on TODAY's cell, not be invisible until the night resolves
+  // tomorrow (see trimInProgressNight() in normalize()).
+  //
+  // One day earlier than the first row: a drink at 1am on dates[0] is on the
+  // civil day before dates[0], so a gte on dates[0] would miss it.
   if (D.drinks.some(Boolean)) {
     const from = new Date(`${D.dates[0]}T12:00:00Z`);
     from.setUTCDate(from.getUTCDate() - 1);
     const { data: rows } = await sb
-      .from("drinks").select("id,night,logged_at,kind,std_drinks")
-      .gte("night", from.toISOString().slice(0, 10)).order("logged_at");
-    const byDay = {}, byNight = {};
+      .from("drinks").select("id,logged_at,std_drinks")
+      .gte("logged_at", from.toISOString()).order("logged_at");
+    const byDay = {};
     for (const r of rows || []) {
       const at = new Date(r.logged_at);
       const day = at.toLocaleDateString("en-CA", { timeZone: tz });   // YYYY-MM-DD
-      (byDay[day] ||= []).push(at.toLocaleTimeString("en-GB", {
-        hour: "2-digit", minute: "2-digit", timeZone: tz,
-      }));
-      (byNight[r.night] ||= []).push({ id: r.id, kind: r.kind, logged_at: at, std_drinks: r.std_drinks });
+      (byDay[day] ||= []).push({ id: r.id, logged_at: at, std_drinks: r.std_drinks });
     }
-    D.drinkTimes = D.dates.map((d) => byDay[d] || []);
-    D.drinkRows = D.dates.map((d) => byNight[d] || []);
+    D.drinkRows = D.dates.map((d) => byDay[d] || []);
+    D.drinkTimes = D.drinkRows.map((day) => day.map((r) => r.logged_at.toLocaleTimeString("en-GB", {
+      hour: "2-digit", minute: "2-digit", timeZone: tz,
+    })));
+    D.firstDrink = D.drinkRows.map((day) => (day.length ? day[0].logged_at : null));
+    D.lastDrink = D.drinkRows.map((day) => (day.length ? day[day.length - 1].logged_at : null));
   }
 
   // The dead man's check the schema was built around and nothing ever read.
@@ -730,18 +761,9 @@ function render() {
   show("dash");
   W = chartWidth();
   const D = DATA;
-  // A "tonight, in progress" placeholder can be the newest row in D.dates --
-  // night_summary FULL OUTER JOINs nights with drinks, and drinks logged
-  // before that night's own nights row has synced show up under night+1
-  // with every n.* column null (see the view's comment in schema.sql). That
-  // makes the actual most recent DAY -- not just the most recent ROW -- one
-  // index back. Strain always exists on a real nights row, even one whose
-  // sleep is still incomplete, so it is what tells the two apart.
-  if (dayIdx < 0 || dayIdx >= D.dates.length) {
-    let i = D.dates.length - 1;
-    while (i > 0 && !ok(D.strain[i])) i--;
-    dayIdx = i;
-  }
+  // normalize() already drops a "tonight, in progress" placeholder row (see
+  // its own comment) -- D.dates.length - 1 is always a real, complete night.
+  if (dayIdx < 0 || dayIdx >= D.dates.length) dayIdx = D.dates.length - 1;
   $("demo-banner").hidden = !isDemo;
   renderTrends(D);
   renderWorkoutsTab(D);
@@ -1116,31 +1138,46 @@ function renderDrinksDayBody() {
   primeReadouts($("drinks-day-body"));
 }
 
-// A time before 4am, chosen for a given NIGHT, actually falls on the
-// following calendar date -- drink_night()'s own 4am-cutoff rule (sql/
-// schema.sql), applied in reverse. Picking 1:00 AM for the night of Sep 5
-// means the drink happened the morning of Sep 6, which is still that same
-// drinking night.
-function drinkTimestamp(night, hhmm) {
+// The add-form's civil day plus a plain wall-clock time. No 4am-cutoff
+// special-casing needed here -- unlike the old night-keyed design, the
+// calendar this opens from already IS the civil day (see loadLive()'s
+// drinkRows comment), so "which day" was never in question.
+function drinkTimestamp(civilDay, hhmm) {
   const [hh, mm] = hhmm.split(":").map(Number);
-  const d = new Date(`${night}T00:00:00`);
-  if (hh < 4) d.setDate(d.getDate() + 1);
+  const d = new Date(`${civilDay}T00:00:00`);
   d.setHours(hh, mm, 0, 0);
   return d;
 }
 
+// Mirrors drinkNight() in lib/night.js and drink_night() in sql/schema.sql --
+// public/app.js can't import lib/ (Vercel only serves public/ as static
+// files). The calendar is civil-day keyed, but the drinks table still needs
+// the actual drinking-NIGHT bucket (4am cutoff) written alongside it -- the
+// dose-response fit and "N drinks the night before" are scoped to that, not
+// to civil day.
+function drinkNightOf(at, tzName) {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tzName, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  });
+  const p = {};
+  for (const part of fmt.formatToParts(at)) if (part.type !== "literal") p[part.type] = part.value;
+  if (p.hour === "24") p.hour = "00";
+  const wall = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+  return new Date(wall - 4 * 3600_000).toISOString().slice(0, 10);
+}
+
 async function addDrink(i, hhmm) {
-  const D = DATA, night = D.dates[i];
-  const at = drinkTimestamp(night, hhmm);
+  const D = DATA, civilDay = D.dates[i];
+  const at = drinkTimestamp(civilDay, hhmm);
 
   if (isDemo) {
-    (D.drinkRows[i] ??= []).push({ id: `demo-${Date.now()}`, kind: MANUAL_DRINK_KIND, logged_at: at, std_drinks: MANUAL_DRINK_STD });
+    (D.drinkRows[i] ??= []).push({ id: `demo-${Date.now()}`, logged_at: at, std_drinks: MANUAL_DRINK_STD });
     D.drinkRows[i].sort((a, b) => a.logged_at - b.logged_at);
-    D.drinks[i] = (D.drinks[i] || 0) + 1;
     return render();
   }
   const { error } = await sb.from("drinks").insert({
-    logged_at: at.toISOString(), night, kind: MANUAL_DRINK_KIND, std_drinks: MANUAL_DRINK_STD, source: "manual",
+    logged_at: at.toISOString(), night: drinkNightOf(at, tz), kind: MANUAL_DRINK_KIND, std_drinks: MANUAL_DRINK_STD, source: "manual",
   });
   if (error) return alert(`Could not add drink: ${error.message}`);
   const live = await loadLive();
@@ -1152,7 +1189,6 @@ async function deleteDrink(i, id) {
   const D = DATA;
   if (isDemo || String(id).startsWith("demo-")) {
     D.drinkRows[i] = (D.drinkRows[i] || []).filter((r) => r.id !== id);
-    D.drinks[i] = Math.max(0, (D.drinks[i] || 0) - 1);
     return render();
   }
   const { error } = await sb.from("drinks").delete().eq("id", id);
@@ -1519,7 +1555,10 @@ function renderDrinksTab(D) {
   for (let day = 1; day <= daysInMonth; day++) {
     const iso = `${drCalYear}-${pad2(drCalMonth + 1)}-${pad2(day)}`;
     const idx = byDate.get(iso);
-    const n = idx != null ? (D.drinks[idx] || 0) : 0;
+    // D.drinkRows, not D.drinks -- the calendar is civil-day keyed (see
+    // loadLive()'s drinkRows comment), so a night still in progress shows
+    // up on the day it's actually happening rather than tomorrow.
+    const n = idx != null ? (D.drinkRows[idx]?.length || 0) : 0;
     // Every loaded day is tappable here, not just ones with drinks already --
     // unlike Workouts (browse-only), this screen's whole point is adding a
     // forgotten night, which by definition starts at zero.
