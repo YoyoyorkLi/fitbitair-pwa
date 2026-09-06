@@ -986,7 +986,7 @@ function renderDay() {
   $("today").innerHTML = `
     <div class="kpis">
       ${kpi(ch.gauge(t.strain, 21, col("strain"), "Day Strain", `Day Strain ${t.strain} of 21|Banister TRIMP over every sample, log-compressed`), "Day Strain", "target 12.6–15.6", "strain")}
-      ${kpi(ch.ring(t.recovery, recCol, "Recovery", `Recovery ${t.recovery}|55% HRV · 25% resting HR · 20% sleep`), "Recovery", t.recovery >= 67 ? "well recovered" : t.recovery >= 34 ? "moderate" : "low", "recovery")}
+      ${kpi(ch.ring(t.recovery, recCol, "Recovery", `Recovery ${t.recovery}|55% HRV · 25% resting HR · 20% sleep`), "Recovery", `${t.recovery >= 67 ? "well recovered" : t.recovery >= 34 ? "moderate" : "low"}${t.drinks ? ` · ${t.drinks} drink${t.drinks > 1 ? "s" : ""}` : ""}`, "recovery")}
       ${kpi(ch.ring(t.score, ok(t.score) && t.score >= 80 ? col("good") : col("awake"), "Sleep Score", ok(t.score) ? `Sleep Score ${t.score}|${hm(t.asleep)} asleep of ${hm(t.need)} needed` : "No sleep recorded|this night has not been scored"), "Sleep Score", ok(t.asleep) ? hm(t.asleep) : "not yet", "sleep")}
     </div>
     ${strip}
