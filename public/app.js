@@ -718,7 +718,18 @@ function render() {
   show("dash");
   W = chartWidth();
   const D = DATA;
-  if (dayIdx < 0 || dayIdx >= D.dates.length) dayIdx = D.dates.length - 1;
+  // A "tonight, in progress" placeholder can be the newest row in D.dates --
+  // night_summary FULL OUTER JOINs nights with drinks, and drinks logged
+  // before that night's own nights row has synced show up under night+1
+  // with every n.* column null (see the view's comment in schema.sql). That
+  // makes the actual most recent DAY -- not just the most recent ROW -- one
+  // index back. Strain always exists on a real nights row, even one whose
+  // sleep is still incomplete, so it is what tells the two apart.
+  if (dayIdx < 0 || dayIdx >= D.dates.length) {
+    let i = D.dates.length - 1;
+    while (i > 0 && !ok(D.strain[i])) i--;
+    dayIdx = i;
+  }
   $("demo-banner").hidden = !isDemo;
   renderTrends(D);
   renderWorkoutsTab(D);
@@ -1369,6 +1380,7 @@ function renderTrendCharts(D, days) {
   $("trend-cards").innerHTML = `
     ${card(`HRV (rMSSD) — ${days} days`, ch.sparkline(W, D, D.hrv, col("accent"), days, "ms"))}
     ${card(`Resting heart rate — ${days} days`, ch.sparkline(W, D, D.rhr, col("warn"), days, "bpm"))}
+    ${card(`Drinks — ${days} days`, ch.bars(W, D, D.drinks, days, col("drink"), Math.round, "drinks"))}
     ${card(`Steps — ${days} days`, ch.bars(W, D, D.steps, days, col("steps"), kfmt, "steps"))}
     ${card(`Sleep Score — ${days} nights`, ch.sparkline(W, D, D.score, col("rem"), days, ""))}`;
   primeReadouts($("trend-cards"));
