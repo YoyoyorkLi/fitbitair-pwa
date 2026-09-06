@@ -211,8 +211,7 @@ a{color:var(--accent)}
 .drinklist{display:flex;flex-direction:column;gap:8px;margin-bottom:20px}
 .drinkrow{display:flex;align-items:center;justify-content:space-between;gap:10px;
   background:var(--panel2);border-radius:5px;padding:10px 12px;font-size:13.5px}
-.drinkrow .wtype{font-weight:600}
-.drinkrow .wtime{color:var(--muted);font-size:12.5px}
+.drinkrow .wtime{color:var(--text);font-size:14px;font-weight:600}
 .drdel{background:none;border:1px solid var(--grid);color:var(--muted);border-radius:6px;
   width:34px;height:34px;font-size:17px;line-height:1;flex:none;
   -webkit-tap-highlight-color:transparent}

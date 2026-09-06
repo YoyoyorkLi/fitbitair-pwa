@@ -1062,14 +1062,10 @@ function renderWorkoutDayBody() {
     : `<p class="note">No workouts recorded for this day.</p>`;
 }
 
-// Mirrors the STD table in api/tap.js -- duplicated, not imported, because
-// public/ is the only part of this repo Vercel serves as static files;
-// lib/ (where the tap endpoint's own copy lives) is unreachable from the
-// browser. Same reasoning as lib/night.js's drink_night() having a second
-// copy in sql/schema.sql: two copies of a small, stable rule beats a round
-// trip this code can't make.
-const STD_DRINKS = { beer: 1.0, wine: 1.0, cocktail: 1.5, shot: 1.0, double: 2.0, other: 1.0 };
-const DRINK_KINDS = Object.keys(STD_DRINKS);
+// Every manually-added drink counts as one plain "other" -- same
+// simplification as the NFC stickers (see api/tap.js): the kind/std_drinks
+// distinction exists in the schema but nothing here asks about it anymore.
+const MANUAL_DRINK_KIND = "other", MANUAL_DRINK_STD = 1.0;
 
 // One night's drinks -- opened from a marked day on the Drinks calendar.
 // Same independence from dayIdx as workoutDayIdx above.
@@ -1089,7 +1085,7 @@ function closeDrinksDay() {
 }
 
 const drinkRow = (r) => `<div class="drinkrow">
-    <div><span class="wtype">${titleCase(r.kind)}</span><span class="wtime"> · ${r.logged_at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</span></div>
+    <span class="wtime">${r.logged_at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</span>
     <button type="button" class="drdel" data-del-drink="${r.id}" aria-label="Delete this drink">×</button>
   </div>`;
 
@@ -1112,9 +1108,6 @@ function renderDrinksDayBody() {
       ? `<div class="drinklist">${rows.map(drinkRow).join("")}</div>`
       : `<p class="note" style="margin:0 0 20px">No drinks recorded for this night.</p>`}
     <form class="drinkadd" data-add-drink>
-      <label class="field"><span>Kind</span>
-        <select name="kind">${DRINK_KINDS.map((k) => `<option value="${k}">${titleCase(k)}</option>`).join("")}</select>
-      </label>
       <label class="field"><span>Time</span>
         <input type="time" name="time" value="${defaultDrinkTime(D, i)}" required></label>
       <button type="submit" class="primary" style="width:auto;padding:13px 18px">Add</button>
@@ -1136,18 +1129,19 @@ function drinkTimestamp(night, hhmm) {
   return d;
 }
 
-async function addDrink(i, kind, hhmm) {
+async function addDrink(i, hhmm) {
   const D = DATA, night = D.dates[i];
   const at = drinkTimestamp(night, hhmm);
-  const std = STD_DRINKS[kind] ?? 1.0;
 
   if (isDemo) {
-    (D.drinkRows[i] ??= []).push({ id: `demo-${Date.now()}`, kind, logged_at: at, std_drinks: std });
+    (D.drinkRows[i] ??= []).push({ id: `demo-${Date.now()}`, kind: MANUAL_DRINK_KIND, logged_at: at, std_drinks: MANUAL_DRINK_STD });
     D.drinkRows[i].sort((a, b) => a.logged_at - b.logged_at);
     D.drinks[i] = (D.drinks[i] || 0) + 1;
     return render();
   }
-  const { error } = await sb.from("drinks").insert({ logged_at: at.toISOString(), night, kind, std_drinks: std, source: "manual" });
+  const { error } = await sb.from("drinks").insert({
+    logged_at: at.toISOString(), night, kind: MANUAL_DRINK_KIND, std_drinks: MANUAL_DRINK_STD, source: "manual",
+  });
   if (error) return alert(`Could not add drink: ${error.message}`);
   const live = await loadLive();
   if (live) DATA = normalize(live);
@@ -1213,7 +1207,7 @@ $("dash").addEventListener("submit", (e) => {
   if (!form) return;
   e.preventDefault();
   const fd = new FormData(form);
-  addDrink(drinksDayIdx, fd.get("kind"), fd.get("time"));
+  addDrink(drinksDayIdx, fd.get("time"));
 });
 $("detail-close").addEventListener("click", closeDetail);
 $("workout-day-close").addEventListener("click", closeWorkoutDay);
@@ -1276,7 +1270,7 @@ function workoutHrCurve(D, i, w) {
   return merged.length ? merged : null;
 }
 
-// From first drink to an hour past the last -- night_summary's first_drink/
+// From first drink to two hours past the last -- night_summary's first_drink/
 // last_drink are absolute timestamps (unlike a workout's plain clock string),
 // so the span comes straight from their difference. Otherwise identical to
 // workoutHrCurve above: a drinking night that runs past midnight needs
@@ -1285,7 +1279,7 @@ function drinkingHrCurve(D, i) {
   const first = D.firstDrink[i], last = D.lastDrink[i];
   if (!first || !last) return null;
   const startMin = first.getHours() * 60 + first.getMinutes();
-  const spanMin = Math.round((last.getTime() - first.getTime()) / 60000) + 60;
+  const spanMin = Math.round((last.getTime() - first.getTime()) / 60000) + 120;
   const endAbs = startMin + spanMin;
   if (endAbs <= 1440) {
     const same = (D.curves[i] || []).filter((p) => { const m = ch.mins(p[0]); return m >= startMin && m <= endAbs; });
