@@ -206,6 +206,21 @@ a{color:var(--accent)}
 .workrow .wtime{color:var(--muted);font-size:12.5px}
 .workrow .wmetrics{color:var(--dim);font-size:12.5px;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
 
+/* One row per drink on #drinks-day. Not a button like .workrow -- there is
+   nothing further to drill into, only the delete action on the right. */
+.drinklist{display:flex;flex-direction:column;gap:8px;margin-bottom:20px}
+.drinkrow{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  background:var(--panel2);border-radius:5px;padding:10px 12px;font-size:13.5px}
+.drinkrow .wtype{font-weight:600}
+.drinkrow .wtime{color:var(--muted);font-size:12.5px}
+.drdel{background:none;border:1px solid var(--grid);color:var(--muted);border-radius:6px;
+  width:34px;height:34px;font-size:17px;line-height:1;flex:none;
+  -webkit-tap-highlight-color:transparent}
+.drdel:active{color:var(--warn);border-color:var(--warn)}
+.drinkadd{display:flex;gap:8px;align-items:flex-end}
+.drinkadd .field{flex:1;margin:0}
+.drinkadd .field span{font-size:12px}
+
 /* #workout-day's per-workout cards: collapsed to time/duration/calories,
    expanding on tap to the heart-rate chart and zone breakdown. The summary
    button IS the card's header -- no separate h2, since the chevron and the
@@ -294,6 +309,8 @@ a{color:var(--accent)}
 .calcell.empty{border-color:transparent;background:none}
 .calcell.has{cursor:pointer;border-color:var(--accent);color:var(--text);font-weight:600;
   -webkit-tap-highlight-color:transparent}
+.calcell.has.drink{border-color:var(--drink)}
+.calcell.has.drink .dot{background:var(--drink)}
 .calcell .dot{
   position:absolute;bottom:4px;right:4px;min-width:6px;height:6px;padding:0 2px;
   border-radius:999px;background:var(--strain);color:var(--bg);

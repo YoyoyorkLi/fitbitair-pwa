@@ -48,6 +48,7 @@
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" aria-selected="true"  data-tab="today">Day</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="workouts">Workouts</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="drinks">Drinks</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="trends">Trends</button>
   </div>
 
@@ -66,6 +67,7 @@
 
   <div id="today"></div>
   <div id="workouts" hidden></div>
+  <div id="drinks" hidden></div>
   <div id="trends" hidden></div>
 
   <!-- Drill-down for one of the three Day-tab dials. Lives inside #dash,
@@ -93,6 +95,18 @@
       <h1 id="workout-day-title"></h1>
     </div>
     <div id="workout-day-body"></div>
+  </div>
+
+  <!-- One night's drinks: opened from a marked day on the Drinks calendar.
+       Same overlay pattern as #workout-day -- add/delete write straight to
+       the drinks table (like the never-built "Fix-up screen" schema.sql
+       already provisioned RLS for), then re-render from the refreshed data. -->
+  <div id="drinks-day" class="detail" hidden>
+    <div class="detail-head">
+      <button id="drinks-day-close" class="nav" type="button" aria-label="Back">‹</button>
+      <h1 id="drinks-day-title"></h1>
+    </div>
+    <div id="drinks-day-body"></div>
   </div>
 </section>
 

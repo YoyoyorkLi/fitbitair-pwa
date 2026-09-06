@@ -440,8 +440,8 @@ const CLOSE_EDGE_PX = 28;
 // be open OVER #detail (a workout row inside the Strain detail opens it), so
 // it takes priority -- closing the TOPMOST screen is the only thing "back"
 // can mean when two are stacked.
-const topOverlay = () => (!$("workout-day").hidden ? $("workout-day") : !$("detail").hidden ? $("detail") : null);
-const closeTopOverlay = () => (!$("workout-day").hidden ? closeWorkoutDay() : closeDetail());
+const topOverlay = () => (!$("drinks-day").hidden ? $("drinks-day") : !$("workout-day").hidden ? $("workout-day") : !$("detail").hidden ? $("detail") : null);
+const closeTopOverlay = () => (!$("drinks-day").hidden ? closeDrinksDay() : !$("workout-day").hidden ? closeWorkoutDay() : closeDetail());
 
 // Logged the same way bindScrub's gestures are (see dbg() above): every
 // attempt, not just the ones that end up qualifying. The scrubber bug looked
@@ -546,6 +546,9 @@ function normalize(D) {
   D.curves ??= only(D.curve || []).map((v) => v || []);
   D.hypnos ??= only(D.hypno || null);
   D.drinkTimes ??= only(D.drink_times || []).map((v) => v || []);
+  D.drinkRows ??= only((D.drink_rows || []).map((r) => ({ ...r, logged_at: new Date(r.logged_at) }))).map((v) => v || []);
+  D.firstDrink ??= only(D.first_drink ? new Date(D.first_drink) : null);
+  D.lastDrink ??= only(D.last_drink ? new Date(D.last_drink) : null);
   D.workouts ??= only(D.workout_list || []).map((v) => v || []);
   for (const k of ["inBed", "need", "hrvBaseline"]) D[k] ??= [];
   return D;
@@ -600,16 +603,23 @@ async function loadLive() {
     hypnos: data.map(hypnoFrom),
     workouts: data.map((r) => (Array.isArray(r.workouts) ? r.workouts : [])),
     drinkTimes: data.map(() => []),
+    drinkRows: data.map(() => []),
+    // For the "heart rate while drinking" chart on #drinks-day -- night_summary
+    // already aggregates these per night, so no extra query needed for them.
+    firstDrink: data.map((r) => (r.first_drink ? new Date(r.first_drink) : null)),
+    lastDrink: data.map((r) => (r.last_drink ? new Date(r.last_drink) : null)),
   };
 
   // One query for every drink in the window rather than one per night visited.
   // A heavy night is ~8 rows, so 45 nights is a couple of hundred at worst --
   // cheaper in one round trip than in a fetch each time you press ‹.
-  // Grouped by the CIVIL DAY each drink happened on, not by its drinking-night
-  // key. hr_curve is now one midnight-to-midnight day, so a session that runs
-  // 9pm to 1am has its markers split across two consecutive charts -- which is
-  // what the day stepper is for. Night keys still drive the dose-response
-  // count; they just no longer decide what gets drawn on a day's curve.
+  // Two different groupings out of the same rows:
+  //   byDay   the CIVIL DAY each drink happened on -- hr_curve is one
+  //           midnight-to-midnight day, so a session that runs 9pm to 1am has
+  //           its markers split across two consecutive charts (drinkTimes).
+  //   byNight the drink's own `night` column -- what #drinks-day lists and
+  //           edits, since that is the bucket "5 drinks the night before"
+  //           and the dose-response count are already both scoped to.
   //
   // One day earlier than the first row: a drink at 1am on dates[0] carries the
   // night key of the day before, so a gte on dates[0] would miss it.
@@ -617,17 +627,19 @@ async function loadLive() {
     const from = new Date(`${D.dates[0]}T12:00:00Z`);
     from.setUTCDate(from.getUTCDate() - 1);
     const { data: rows } = await sb
-      .from("drinks").select("night,logged_at")
+      .from("drinks").select("id,night,logged_at,kind,std_drinks")
       .gte("night", from.toISOString().slice(0, 10)).order("logged_at");
-    const byDay = {};
+    const byDay = {}, byNight = {};
     for (const r of rows || []) {
       const at = new Date(r.logged_at);
       const day = at.toLocaleDateString("en-CA", { timeZone: tz });   // YYYY-MM-DD
       (byDay[day] ||= []).push(at.toLocaleTimeString("en-GB", {
         hour: "2-digit", minute: "2-digit", timeZone: tz,
       }));
+      (byNight[r.night] ||= []).push({ id: r.id, kind: r.kind, logged_at: at, std_drinks: r.std_drinks });
     }
     D.drinkTimes = D.dates.map((d) => byDay[d] || []);
+    D.drinkRows = D.dates.map((d) => byNight[d] || []);
   }
 
   // The dead man's check the schema was built around and nothing ever read.
@@ -733,8 +745,10 @@ function render() {
   $("demo-banner").hidden = !isDemo;
   renderTrends(D);
   renderWorkoutsTab(D);
+  renderDrinksTab(D);
   renderDay();
   if (workoutDayIdx != null && !$("workout-day").hidden) { renderWorkoutDayBody(); primeReadouts($("workout-day")); }
+  if (drinksDayIdx != null && !$("drinks-day").hidden) { renderDrinksDayBody(); primeReadouts($("drinks-day")); }
   if (!bound) {
     bound = true;
     bindTips($("dash"));
@@ -1048,6 +1062,112 @@ function renderWorkoutDayBody() {
     : `<p class="note">No workouts recorded for this day.</p>`;
 }
 
+// Mirrors the STD table in api/tap.js -- duplicated, not imported, because
+// public/ is the only part of this repo Vercel serves as static files;
+// lib/ (where the tap endpoint's own copy lives) is unreachable from the
+// browser. Same reasoning as lib/night.js's drink_night() having a second
+// copy in sql/schema.sql: two copies of a small, stable rule beats a round
+// trip this code can't make.
+const STD_DRINKS = { beer: 1.0, wine: 1.0, cocktail: 1.5, shot: 1.0, double: 2.0, other: 1.0 };
+const DRINK_KINDS = Object.keys(STD_DRINKS);
+
+// One night's drinks -- opened from a marked day on the Drinks calendar.
+// Same independence from dayIdx as workoutDayIdx above.
+let drinksDayIdx = null;
+
+function openDrinksDay(i) {
+  drinksDayIdx = i;
+  renderDrinksDayBody();
+  $("drinks-day").hidden = false;
+  $("drinks-day").scrollTop = 0;
+  primeReadouts($("drinks-day"));
+}
+function closeDrinksDay() {
+  drinksDayIdx = null;
+  $("drinks-day").hidden = true;
+  tip.hidden = true;
+}
+
+const drinkRow = (r) => `<div class="drinkrow">
+    <div><span class="wtype">${titleCase(r.kind)}</span><span class="wtime"> · ${r.logged_at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</span></div>
+    <button type="button" class="drdel" data-del-drink="${r.id}" aria-label="Delete this drink">×</button>
+  </div>`;
+
+// Defaults the add-form's time to now, but only on the night that IS
+// tonight -- pre-filling "now" on a night from three weeks ago would read
+// as today's time attached to the wrong date until you noticed and fixed it.
+function defaultDrinkTime(D, i) {
+  const isTonight = i === D.dates.length - 1;
+  const at = isTonight ? new Date() : new Date(`${D.dates[i]}T21:00:00`);
+  return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+}
+
+function renderDrinksDayBody() {
+  const D = DATA, i = drinksDayIdx;
+  const rows = D.drinkRows[i] || [];
+  const curve = drinkingHrCurve(D, i);
+  $("drinks-day-title").textContent = ch.dlabel(D.dates[i]);
+  $("drinks-day-body").innerHTML = `
+    ${rows.length
+      ? `<div class="drinklist">${rows.map(drinkRow).join("")}</div>`
+      : `<p class="note" style="margin:0 0 20px">No drinks recorded for this night.</p>`}
+    <form class="drinkadd" data-add-drink>
+      <label class="field"><span>Kind</span>
+        <select name="kind">${DRINK_KINDS.map((k) => `<option value="${k}">${titleCase(k)}</option>`).join("")}</select>
+      </label>
+      <label class="field"><span>Time</span>
+        <input type="time" name="time" value="${defaultDrinkTime(D, i)}" required></label>
+      <button type="submit" class="primary" style="width:auto;padding:13px 18px">Add</button>
+    </form>
+    ${curve ? card("Heart rate while drinking", ch.hrIntraday(W, { curve, zoned: true, hrmax: D.hrmax, rhr: D.rhr[i] })) : ""}`;
+  primeReadouts($("drinks-day-body"));
+}
+
+// A time before 4am, chosen for a given NIGHT, actually falls on the
+// following calendar date -- drink_night()'s own 4am-cutoff rule (sql/
+// schema.sql), applied in reverse. Picking 1:00 AM for the night of Sep 5
+// means the drink happened the morning of Sep 6, which is still that same
+// drinking night.
+function drinkTimestamp(night, hhmm) {
+  const [hh, mm] = hhmm.split(":").map(Number);
+  const d = new Date(`${night}T00:00:00`);
+  if (hh < 4) d.setDate(d.getDate() + 1);
+  d.setHours(hh, mm, 0, 0);
+  return d;
+}
+
+async function addDrink(i, kind, hhmm) {
+  const D = DATA, night = D.dates[i];
+  const at = drinkTimestamp(night, hhmm);
+  const std = STD_DRINKS[kind] ?? 1.0;
+
+  if (isDemo) {
+    (D.drinkRows[i] ??= []).push({ id: `demo-${Date.now()}`, kind, logged_at: at, std_drinks: std });
+    D.drinkRows[i].sort((a, b) => a.logged_at - b.logged_at);
+    D.drinks[i] = (D.drinks[i] || 0) + 1;
+    return render();
+  }
+  const { error } = await sb.from("drinks").insert({ logged_at: at.toISOString(), night, kind, std_drinks: std, source: "manual" });
+  if (error) return alert(`Could not add drink: ${error.message}`);
+  const live = await loadLive();
+  if (live) DATA = normalize(live);
+  render();
+}
+
+async function deleteDrink(i, id) {
+  const D = DATA;
+  if (isDemo || String(id).startsWith("demo-")) {
+    D.drinkRows[i] = (D.drinkRows[i] || []).filter((r) => r.id !== id);
+    D.drinks[i] = Math.max(0, (D.drinks[i] || 0) - 1);
+    return render();
+  }
+  const { error } = await sb.from("drinks").delete().eq("id", id);
+  if (error) return alert(`Could not delete drink: ${error.message}`);
+  const live = await loadLive();
+  if (live) DATA = normalize(live);
+  render();
+}
+
 $("dash").addEventListener("click", (e) => {
   if (e.target.closest?.("[data-wo-toggle]")) {
     showWorkouts = !showWorkouts;
@@ -1072,6 +1192,12 @@ $("dash").addEventListener("click", (e) => {
   if (cell) return openWorkoutDay(Number(cell.dataset.dayIdx));
   if (e.target.closest?.("#cal-prev")) return stepCalMonth(-1);
   if (e.target.closest?.("#cal-next")) return stepCalMonth(1);
+  const drCell = e.target.closest?.(".calcell[data-drinks-day-idx]");
+  if (drCell) return openDrinksDay(Number(drCell.dataset.drinksDayIdx));
+  if (e.target.closest?.("#drcal-prev")) return stepDrinksCalMonth(-1);
+  if (e.target.closest?.("#drcal-next")) return stepDrinksCalMonth(1);
+  const del = e.target.closest?.("[data-del-drink]");
+  if (del) return deleteDrink(drinksDayIdx, del.dataset.delDrink);
   const wt = e.target.closest?.(".wsummary[data-wtoggle]");
   if (wt) {
     const body = $(`wexpand-${wt.dataset.wtoggle}`);
@@ -1082,8 +1208,16 @@ $("dash").addEventListener("click", (e) => {
     if (opening) primeReadouts(body);
   }
 });
+$("dash").addEventListener("submit", (e) => {
+  const form = e.target.closest?.("[data-add-drink]");
+  if (!form) return;
+  e.preventDefault();
+  const fd = new FormData(form);
+  addDrink(drinksDayIdx, fd.get("kind"), fd.get("time"));
+});
 $("detail-close").addEventListener("click", closeDetail);
 $("workout-day-close").addEventListener("click", closeWorkoutDay);
+$("drinks-day-close").addEventListener("click", closeDrinksDay);
 // #workout-day can be open OVER #detail (opened from a Strain-detail workout
 // row); closeTopOverlay (defined with bindSwipe above) closes whichever is
 // topmost, so Escape and the edge-swipe agree on the same order.
@@ -1139,6 +1273,28 @@ function workoutHrCurve(D, i, w) {
   const first = (D.curves[i] || []).filter((p) => ch.mins(p[0]) >= startMin);
   const second = (D.curves[i + 1] || []).filter((p) => ch.mins(p[0]) <= endWrapped);
   const merged = [...first, ...second];
+  return merged.length ? merged : null;
+}
+
+// From first drink to an hour past the last -- night_summary's first_drink/
+// last_drink are absolute timestamps (unlike a workout's plain clock string),
+// so the span comes straight from their difference. Otherwise identical to
+// workoutHrCurve above: a drinking night that runs past midnight needs
+// D.curves[i + 1] the same way a late workout would.
+function drinkingHrCurve(D, i) {
+  const first = D.firstDrink[i], last = D.lastDrink[i];
+  if (!first || !last) return null;
+  const startMin = first.getHours() * 60 + first.getMinutes();
+  const spanMin = Math.round((last.getTime() - first.getTime()) / 60000) + 60;
+  const endAbs = startMin + spanMin;
+  if (endAbs <= 1440) {
+    const same = (D.curves[i] || []).filter((p) => { const m = ch.mins(p[0]); return m >= startMin && m <= endAbs; });
+    return same.length ? same : null;
+  }
+  const endWrapped = endAbs - 1440;
+  const evening = (D.curves[i] || []).filter((p) => ch.mins(p[0]) >= startMin);
+  const morning = (D.curves[i + 1] || []).filter((p) => ch.mins(p[0]) <= endWrapped);
+  const merged = [...evening, ...morning];
   return merged.length ? merged : null;
 }
 
@@ -1342,6 +1498,55 @@ function renderWorkoutsTab(D) {
     <p class="note" style="margin-top:14px">Days outlined in teal had a workout — tap one to see it.</p>`;
 }
 
+// Own month cursor, independent of calYear/calMonth above -- browsing March
+// on the Drinks calendar has nothing to do with which month Workouts is on,
+// same reasoning calYear/calMonth's own comment gives for staying off dayIdx.
+let drCalYear = null, drCalMonth = null;
+
+function stepDrinksCalMonth(delta) {
+  drCalMonth += delta;
+  if (drCalMonth < 0) { drCalMonth = 11; drCalYear--; }
+  if (drCalMonth > 11) { drCalMonth = 0; drCalYear++; }
+  renderDrinksTab(DATA);
+}
+
+function renderDrinksTab(D) {
+  if (drCalYear == null) {
+    const [y, m] = D.dates[D.dates.length - 1].split("-").map(Number);
+    drCalYear = y; drCalMonth = m - 1;
+  }
+  const byDate = new Map(D.dates.map((d, i) => [d, i]));
+  const first = new Date(drCalYear, drCalMonth, 1);
+  const daysInMonth = new Date(drCalYear, drCalMonth + 1, 0).getDate();
+  const monthLabel = first.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+
+  let cells = "";
+  for (let k = 0; k < first.getDay(); k++) cells += `<div class="calcell empty"></div>`;
+  for (let day = 1; day <= daysInMonth; day++) {
+    const iso = `${drCalYear}-${pad2(drCalMonth + 1)}-${pad2(day)}`;
+    const idx = byDate.get(iso);
+    const n = idx != null ? (D.drinks[idx] || 0) : 0;
+    // Every loaded day is tappable here, not just ones with drinks already --
+    // unlike Workouts (browse-only), this screen's whole point is adding a
+    // forgotten night, which by definition starts at zero.
+    cells += idx != null
+      ? `<button type="button" class="calcell${n ? " has drink" : ""}" data-drinks-day-idx="${idx}">${day}${n ? `<span class="dot">${n > 1 ? n : ""}</span>` : ""}</button>`
+      : `<div class="calcell out">${day}</div>`;
+  }
+
+  $("drinks").innerHTML = `
+    <div class="calnav">
+      <button class="nav" id="drcal-prev" type="button" aria-label="Previous month">‹</button>
+      <p class="calmonth">${monthLabel}</p>
+      <button class="nav" id="drcal-next" type="button" aria-label="Next month">›</button>
+    </div>
+    <div class="calgrid">
+      ${CAL_WEEKDAYS.map((d) => `<div class="calhead">${d}</div>`).join("")}
+      ${cells}
+    </div>
+    <p class="note" style="margin-top:14px">Nights outlined in amber had a drink — tap one to see, add, or delete.</p>`;
+}
+
 // The dose-response chart pools every night the account has ever had -- more
 // history is always better for a fit, so it stays outside the range toggle
 // below. The four trend charts are windowed reads of the *same* day-count.
@@ -1390,7 +1595,7 @@ function renderTrendCharts(D, days) {
 for (const btn of document.querySelectorAll(".tab")) {
   btn.addEventListener("click", () => {
     for (const b of document.querySelectorAll(".tab")) b.setAttribute("aria-selected", String(b === btn));
-    for (const id of ["today", "workouts", "trends"]) $(id).hidden = id !== btn.dataset.tab;
+    for (const id of ["today", "workouts", "drinks", "trends"]) $(id).hidden = id !== btn.dataset.tab;
     // Trends pools every night the account has, and Workouts has its own
     // month navigation -- a night selector on top of either would be a
     // control that changes nothing on Trends, and a second, conflicting
