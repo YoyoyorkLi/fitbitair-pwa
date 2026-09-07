@@ -197,11 +197,9 @@ def sync(days=None, con=None, verbose=False, progress=None):
             w1 = min(w0 + timedelta(days=step), end)
             tasks.append((dt, w0, w1))
 
-    # 5 workers, each request ~1-2s: ~150-300 req/min, under Google's 300/min
-    # ceiling, and fetch() backs off on a 429 anyway.
     got = {dt: [] for dt in cfg.DATA_TYPES}
     done = 0
-    with ThreadPoolExecutor(max_workers=5) as ex:
+    with ThreadPoolExecutor(max_workers=min(cfg.SYNC_WORKERS, len(tasks) or 1)) as ex:
         futs = {ex.submit(fetch, dt, w0, w1, token): dt for dt, w0, w1 in tasks}
         for fut in as_completed(futs):
             got[futs[fut]] += fut.result()      # re-raises fetch()'s RuntimeError

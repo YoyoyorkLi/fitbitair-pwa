@@ -69,9 +69,10 @@ SCOPES = [
 ]
 
 # Google caps a single query window: 14 days for heart-rate and other
-# high-volume types, 90 days for the rest. Stay well under both.
+# high-volume types, 90 days for the rest. Stay well under both. 45 keeps the
+# catch-up history window (CATCHUP_HIST_DAYS + 1) to a single request per type.
 MAX_WINDOW_DAYS = {"heart-rate": 1}      # 1/day also keeps pages under the 10k cap
-DEFAULT_WINDOW_DAYS = 30
+DEFAULT_WINDOW_DAYS = 45
 
 # Catch-up sync (ingest.sync() with no day count -- the hourly CI path). The
 # runner keeps no cache between runs, so every run is a fresh pull. heart-rate
@@ -79,8 +80,17 @@ DEFAULT_WINDOW_DAYS = 30
 # of it; but pull a full baseline window of the cheap daily/sleep types so
 # push can still compute a 30-day trailing median. build_rows() is driven by
 # the heart-rate days, so this also scopes what gets written to Supabase.
-CATCHUP_HR_DAYS = 5
+#
+# HR at 3 covers today + the two prior nights -- enough for a night whose sleep
+# session syncs to Google hours after you wake. Each day is one request, so
+# this is the main lever on wall time.
+CATCHUP_HR_DAYS = 3
 CATCHUP_HIST_DAYS = 35
+
+# Concurrent Google requests. The catch-up set is ~15 requests, a `push 60`
+# repair ~150; 12 workers clears either in a couple of rounds and stays under
+# the 300 req/min per-user ceiling (fetch() also backs off on a 429).
+SYNC_WORKERS = 12
 
 # Endpoint names are kebab-case; filter parameters are snake_case. The record
 # kind determines the filter field path -- getting this wrong is a 400.

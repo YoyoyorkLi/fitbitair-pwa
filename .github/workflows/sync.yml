@@ -47,10 +47,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: pulse/requirements.txt
 
-      - run: pip install -r requirements.txt
+      # uv installs numpy + pandas in ~1s from its hard-linked cache; plain
+      # `pip install` was ~9s of unpacking every run.
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: pulse/requirements.txt
+
+      - run: uv pip install --system -r requirements.txt
 
       # auth.access_token() reads a *file*, .token.json, not an env var -- it
       # was designed for a laptop where `pulse login` writes that file once.
