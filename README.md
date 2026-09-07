@@ -32,8 +32,8 @@ referenced below, live under that directory.
 
 ## Scheduled sync
 
-`.github/workflows/sync.yml` runs `pulse sync && pulse push` hourly. It needs
-six repo secrets (**Settings → Secrets and variables → Actions**):
+`.github/workflows/sync.yml` runs `pulse push sync` hourly. It needs six repo
+secrets (**Settings → Secrets and variables → Actions**):
 
 | Secret | Where it comes from |
 |---|---|
@@ -42,10 +42,13 @@ six repo secrets (**Settings → Secrets and variables → Actions**):
 | `PULSE_TZ` | `America/Chicago` |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | `.env.local` |
 
-`push()` recomputes and upserts *every* night in the local cache on each run,
-not just new ones — so once this workflow exists, its first run (wait for the
-next `:07`, or click **Run workflow** in the Actions tab to go now) pushes the
-entire backfilled history to Supabase in one pass. No separate manual step.
+Each hourly run pulls ~5 days of heart-rate (a finished day never changes) plus
+a ~35-day window of the cheap daily metrics for baselines, all requests
+concurrent, and upserts only the ~5 recent nights those cover — older Supabase
+rows are already correct. A run takes well under a minute; nothing is cached
+between runs. To rebuild the whole history — first setup, or after a
+`metrics.py` change — click **Run workflow** in the Actions tab with **full:
+true**.
 
 ## Deploy
 

@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
@@ -124,13 +126,25 @@ def fetch(data_type, start: datetime, end: datetime, token, method="list"):
             q["pageToken"] = page
         req = urllib.request.Request(base + "?" + urllib.parse.urlencode(q),
                                      headers={"Authorization": f"Bearer {token}"})
-        try:
-            with urllib.request.urlopen(req, timeout=120) as r:
-                body = json.loads(r.read())
-        except urllib.error.HTTPError as e:
-            raise RuntimeError(_explain(e, data_type)) from None
-        except urllib.error.URLError as e:
-            raise RuntimeError(f"{data_type}: network error: {e.reason}") from None
+        # Retry a 429 or a transient network blip a few times with a growing
+        # pause -- fetch() now runs several windows concurrently (see sync()),
+        # so a brief brush with the 300 req/min ceiling should back off rather
+        # than fail the whole run.
+        for attempt in range(4):
+            try:
+                with urllib.request.urlopen(req, timeout=120) as r:
+                    body = json.loads(r.read())
+                break
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and attempt < 3:
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                raise RuntimeError(_explain(e, data_type)) from None
+            except urllib.error.URLError as e:
+                if attempt < 3:
+                    time.sleep(1.0 * (attempt + 1))
+                    continue
+                raise RuntimeError(f"{data_type}: network error: {e.reason}") from None
         out += body.get("dataPoints", [])
         page = body.get("nextPageToken")
         if not page:
@@ -138,59 +152,66 @@ def fetch(data_type, start: datetime, end: datetime, token, method="list"):
     return out
 
 
-def last_cached_day(con):
-    """Newest day present in the cache, or None. Drives catch-up sync."""
-    row = con.execute("SELECT MAX(pit) FROM raw WHERE data_type=?",
-                      ("daily-resting-heart-rate",)).fetchone()
-    if not row or not row[0]:
-        row = con.execute("SELECT MAX(pit) FROM raw WHERE data_type=?",
-                          ("heart-rate",)).fetchone()
-    if not row or not row[0]:
-        return None
-    try:
-        return datetime.strptime(str(row[0])[:10], "%Y-%m-%d").replace(tzinfo=UTC)
-    except ValueError:
-        return None
-
-
 def sync(days=None, con=None, verbose=False, progress=None):
     """Pull every configured data type into the local cache.
 
-    days=None means catch up: from the newest cached day to today, with a 2-day
-    overlap so a partially-synced night is corrected. Empty cache falls back to
-    30 days. A laptop shut for a week heals itself on the next run.
+    days=None is CATCH-UP, the hourly CI path: no cache survives between runs
+    (this repo is public, so pulse.db is never persisted anywhere a fork PR
+    could read it), so every run is a fresh pull. heart-rate is the only heavy
+    type -- ~17k points/day -- and a finished day never changes, so it gets a
+    short window (config.CATCHUP_HR_DAYS); the cheap daily/sleep/steps/exercise
+    types get a full baseline window (config.CATCHUP_HIST_DAYS) so push() can
+    still compute a 30-day trailing median. build_rows() keys off the
+    heart-rate days, so the short HR window also scopes what reaches Supabase.
+
+    days=N pulls N days of EVERY type -- a backfill or a repair.
+
+    Every (data type, window) pair is one request; heart-rate is capped at one
+    day per request (config.MAX_WINDOW_DAYS), and they all run concurrently.
+    Doing ~30 one-day HR requests in series is why a fresh sync used to take
+    minutes.
     """
     con = con if con is not None else db()
     token = access_token()
     end = (datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
            + timedelta(days=1))
 
+    # Fetch one extra day at the start of every window. The API windows on UTC
+    # instants but we aggregate in local civil time, so a window beginning at
+    # UTC midnight leaves the earliest *local* day short by the UTC offset (5 h
+    # in Chicago) -- which would plot as an artificially low-strain rest day.
     if days is None:
-        last = last_cached_day(con)
-        days = 30 if last is None else max(2, (end - last).days + 1)
-        days = min(days, 365)
-    days = max(1, int(days))
+        hr_span = cfg.CATCHUP_HR_DAYS + 1
+        hist_span = cfg.CATCHUP_HIST_DAYS + 1
+    else:
+        hr_span = hist_span = max(1, int(days)) + 1
 
-    # Fetch one extra day at the start. The API windows on UTC instants but we
-    # aggregate in local civil time, so a window beginning at UTC midnight
-    # leaves the earliest *local* day short by the UTC offset (5 h in Chicago).
-    # Without this, the oldest day on every chart shows an artificially low
-    # strain. One extra request per type is a cheap fix.
-    span = days + 1
-
-    counts = {}
+    # One task per request. step chunks to Google's per-request window cap
+    # (1 day for heart-rate, 90 for the rest -- config.MAX_WINDOW_DAYS).
+    tasks = []
     for dt in cfg.DATA_TYPES:
-        # Chunk to respect Google's per-request window cap rather than trusting
-        # the caller: 14 days for heart-rate, 90 for the rest.
+        span = hr_span if dt == "heart-rate" else hist_span
         step = max(1, min(cfg.MAX_WINDOW_DAYS.get(dt, cfg.DEFAULT_WINDOW_DAYS), span))
-        pts = []
         for off in range(0, span, step):
             w0 = end - timedelta(days=span - off)
             w1 = min(w0 + timedelta(days=step), end)
+            tasks.append((dt, w0, w1))
+
+    # 5 workers, each request ~1-2s: ~150-300 req/min, under Google's 300/min
+    # ceiling, and fetch() backs off on a 429 anyway.
+    got = {dt: [] for dt in cfg.DATA_TYPES}
+    done = 0
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        futs = {ex.submit(fetch, dt, w0, w1, token): dt for dt, w0, w1 in tasks}
+        for fut in as_completed(futs):
+            got[futs[fut]] += fut.result()      # re-raises fetch()'s RuntimeError
+            done += 1
             if progress:
-                progress(dt, off // step + 1, (span + step - 1) // step)
-            pts += fetch(dt, w0, w1, token)
-        counts[dt] = save(dt, pts, con)
+                progress("fetch", done, len(tasks))
+
+    counts = {}
+    for dt in cfg.DATA_TYPES:
+        counts[dt] = save(dt, got[dt], con)
         if verbose:
             print(f"  {dt:32s} {counts[dt]:>8,}")
     return counts

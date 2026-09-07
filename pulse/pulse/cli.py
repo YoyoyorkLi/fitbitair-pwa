@@ -201,10 +201,14 @@ def main(argv=None):
 
     elif cmd == "push":
         from . import push as ps
-        if arg:                       # optional: sync first, then push
+        if arg == "sync":             # catch-up sync, then push -- the CI path.
+            from . import ingest as ig    # Skips the dashboard.html build that
+            print("catching up ...")      # `pulse sync` does and CI never reads.
+            ig.sync(days=None, verbose=True)
+        elif arg:                     # optional: sync N days first, then push
             from . import ingest as ig
             print(f"syncing {arg} days first ...")
-            ig.sync(days=int(arg))
+            ig.sync(days=int(arg), verbose=True)
         ps.push()
 
     elif cmd == "doctor":

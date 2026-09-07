@@ -441,9 +441,20 @@ It is one ~80 kB file. Genuinely fine for occasional use.
 
 **What's actually running: GitHub Actions**, not this section. See
 [`../.github/workflows/sync.yml`](../.github/workflows/sync.yml) — hourly,
-`pulse sync && pulse push`, six repo secrets (documented in the repo root
+`pulse push sync`, six repo secrets (documented in the repo root
 [`README.md`](../README.md)). Keeping it alive is exactly [2d above](#2d-living-with-testing-mode--refresh_loginsh):
 `refresh_login.sh` weekly, nothing else.
+
+A run used to take ~4 min — 30 one-day heart-rate requests in series. Now the
+catch-up sync pulls only **~5 days of heart-rate** (a finished day never
+changes, and HR is the one heavy type at ~17k points/day), a full **~35-day
+window of the cheap daily/sleep/steps types** so `push` can still compute a
+30-day trailing baseline, and it fires every request **concurrently**.
+`build_rows()` keys off the heart-rate days, so only those ~5 nights are
+upserted — the rest of Supabase is already correct. A run is now well under a
+minute. **Nothing is cached between runs**: this repo is public, and `pulse.db`
+is raw health history. **Actions → Run workflow → full: true** re-pulls 90 days
+of everything and re-pushes every night, for a `metrics.py` change or a repair.
 
 The `launchd` approach below is the alternative for running this **entirely
 on a Mac**, with no GitHub Actions and no repo secrets involved at all — never
@@ -479,10 +490,11 @@ EOF
 launchctl load ~/Library/LaunchAgents/local.pulse.plist
 ```
 
-`sync` with **no number** is catch-up mode: it fetches from the newest cached
-day forward with a 2-day overlap, so a partially-synced night gets corrected.
-Shut for a week? It fetches eight days on the next run. Asleep at 07:00? It runs
-on wake. There is no state to repair.
+`sync` with **no number** is catch-up mode: a fixed ~5-day window of
+heart-rate and ~35 days of the daily metrics, merged into whatever the local
+`pulse.db` already holds. A partially-synced night gets corrected on the next
+run. Off for longer than ~5 days? Run `pulse sync 14` once to fill the
+heart-rate gap; the daily metrics self-heal from the 35-day window.
 
 Check it ran: `tail sync.log`.
 
@@ -496,7 +508,8 @@ Check it ran: `tail sync.log`.
 | `setup [json]` | no | `.env` | Store client ID/secret and timezone. |
 | `login` | yes | `.token.json` | One-time browser sign-in. |
 | `doctor [days]` | yes | nothing | Probe types, show real field names. |
-| `sync [days]` | yes | `pulse.db`, `dashboard.html` | Pull. No number = catch up. |
+| `sync [days]` | yes | `pulse.db`, `dashboard.html` | Pull. No number = catch up. Requests run concurrently. |
+| `push [days\|sync]` | yes | Supabase (`pulse.db` if a number/`sync`) | Upsert nights. `sync` = catch-up pull + push, no HTML build (the CI path). A number pulls that many days first. |
 | `build` | no | `dashboard.html` | Re-render from cache. |
 | `phone [port]` | LAN | nothing | Serve one file, print QR. |
 | `status` | no | nothing | Credentials, connection, cache. |

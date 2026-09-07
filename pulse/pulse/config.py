@@ -73,6 +73,15 @@ SCOPES = [
 MAX_WINDOW_DAYS = {"heart-rate": 1}      # 1/day also keeps pages under the 10k cap
 DEFAULT_WINDOW_DAYS = 30
 
+# Catch-up sync (ingest.sync() with no day count -- the hourly CI path). The
+# runner keeps no cache between runs, so every run is a fresh pull. heart-rate
+# is ~17k points/day and a finished day never changes, so pull only a few days
+# of it; but pull a full baseline window of the cheap daily/sleep types so
+# push can still compute a 30-day trailing median. build_rows() is driven by
+# the heart-rate days, so this also scopes what gets written to Supabase.
+CATCHUP_HR_DAYS = 5
+CATCHUP_HIST_DAYS = 35
+
 # Endpoint names are kebab-case; filter parameters are snake_case. The record
 # kind determines the filter field path -- getting this wrong is a 400.
 #   Sample   -> {type}.sample_time.physical_time

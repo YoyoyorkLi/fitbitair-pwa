@@ -1,21 +1,37 @@
 name: sync
 
-# Hourly: pull Google Health into a fresh local cache, compute nights, push to
-# Supabase. "Fresh" is load-bearing -- see the note below on why this never
-# tries to reuse a cache between runs.
+# Hourly: catch Google Health up, compute nights, push the recent ones to
+# Supabase.
+#
+# This used to pull a fresh 30 days every run -- ~30 sequential one-day
+# heart-rate requests, ~4 minutes. Nothing is cached between runs on purpose:
+# this repo is PUBLIC, and pulse.db is your raw HR/sleep history -- a cache a
+# fork PR could restore and read is not worth the minutes it saves. Instead
+# `pulse push sync` (== ingest.sync() catch-up + push, no dashboard.html build):
+#   - pulls only ~5 days of heart-rate (a finished day never changes, and HR is
+#     the only heavy type -- ~17k points/day)
+#   - pulls a full ~35-day baseline window of the cheap daily/sleep/steps types
+#     so push() can still compute a 30-day trailing median
+#   - runs every request concurrently
+#   - build_rows() keys off the heart-rate days, so only those ~5 nights reach
+#     Supabase -- the older rows are already correct and Google never revises a
+#     finished day
 #
 # The Python side lives in pulse/, a subdirectory of this repo -- Vercel
-# deploys the repo root (api/, public/) and ignores this entirely; nothing
-# here is served or built by that half. working-directory on every step below
-# is what makes that split work: the checkout brings the whole repo, but
-# `python -m pulse` only resolves correctly run from inside pulse/.
+# deploys the repo root (api/, public/) and ignores this entirely. The
+# working-directory below is what makes that split work: the checkout brings
+# the whole repo, but `python -m pulse` only resolves correctly from inside
+# pulse/.
 on:
   schedule:
     - cron: "7 * * * *"     # :07 past the hour, not :00 -- GitHub queues every
                              # repo's on-the-hour jobs together and delays them
-  workflow_dispatch: {}      # the "Run workflow" button, for a manual kick --
-                             # also how to push a full backfill into Supabase
-                             # immediately rather than waiting for the next tick
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "Re-pull 60 days and re-push every night (metrics.py change / repair)"
+        type: boolean
+        default: false
 
 jobs:
   sync:
@@ -38,14 +54,10 @@ jobs:
 
       # auth.access_token() reads a *file*, .token.json, not an env var -- it
       # was designed for a laptop where `pulse login` writes that file once.
-      # A runner has no laptop and no file to reuse: every run checks out a
-      # fresh copy of the repo, so this step exists on every single run, not
-      # just the first. Only `refresh_token` is required; access_token()
-      # refreshes the access token itself from that, using GH_CLIENT_ID /
-      # GH_CLIENT_SECRET, and would overwrite this file with a short-lived
-      # access_token anyway -- so there's nothing to gain by trying to persist
-      # it, and real value in NOT trying (no secret written back to a fork's
-      # cache, no stale-token class of bug).
+      # Only `refresh_token` is required; access_token() refreshes the access
+      # token from it via GH_CLIENT_ID / GH_CLIENT_SECRET, and would overwrite
+      # this file with a short-lived access_token anyway -- so it is written
+      # fresh every run and never persisted.
       - name: Write .token.json from the refresh-token secret
         run: |
           python -c "
@@ -55,18 +67,11 @@ jobs:
         env:
           GH_REFRESH_TOKEN: ${{ secrets.GH_REFRESH_TOKEN }}
 
-      # Bare `sync` (no day count): ingest.py's own fallback is "empty cache
-      # -> 30 days". Every run's cache IS empty (see above), so every run
-      # pulls a fresh 30-day window -- comfortably covers one missed hour or
-      # a week of the runner being down, and costs nothing extra: `_pit()`
-      # keys drinks by point so an overlapping re-sync is a no-op, and
-      # Supabase upserts nights by their `night` primary key. push() always
-      # computes and upserts every night currently cached, not just new ones
-      # -- so the FIRST run after this workflow exists pushes the full local
-      # history in one pass, not just what changed since.
-      - run: |
-          python -m pulse sync
-          python -m pulse push
+      # Normal run: `push sync` == catch-up ingest.sync() + push, no HTML build.
+      # full=true instead: `push 60` re-pulls 60 days of everything (including
+      # heart-rate, one request per day) and re-pushes every night. Anything
+      # deeper is a local `python -m pulse push <N>`.
+      - run: python -m pulse ${{ (github.event_name == 'workflow_dispatch' && inputs.full) && 'push 60' || 'push sync' }}
         env:
           GH_CLIENT_ID: ${{ secrets.GH_CLIENT_ID }}
           GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
