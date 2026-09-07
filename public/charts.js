@@ -425,7 +425,10 @@ function nightSpan(start, minutes, tLo) {
 }
 
 export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null, hrmax, rhr, session = false }) {
-  const h = 232, x0 = padL(W), x1 = W - padR(W), y0 = 36, y1 = 186, yAxis = 208;
+  // y0 is set well below the top edge to leave a margin for the marker tags
+  // that float above the plot -- workout badges on the top row, then up to two
+  // staggered rows of drink badges below them.
+  const h = 250, x0 = padL(W), x1 = W - padR(W), y0 = 54, y1 = 204, yAxis = 226;
   // A night's row has no curve until that sleep session has ended and synced --
   // push.py only computes hr_curve once sleep_start/sleep_end exist. That is
   // the normal state on every first login of the day, not an error.
@@ -539,19 +542,22 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null,
         ${txt(x, cy + 3.2, i + 1, { size: 8.5, anchor: "middle", fill: "bg", weight: 700 })}`;
     });
 
-  // Workout badges: a numbered dot at the top of each session's band, over the
-  // HR line so it stays legible whatever the trace is doing. Same two-row
-  // stagger as the drinks above for the rare pair that lands close; the number
-  // is the session's caption index, so it survives the sort.
-  const WR = 7, WROWS = [y0 + 9, y0 + 26];
-  let woLastX = -1e9, woRow = 0;
+  // Workout badges: a numbered dot in the top margin ABOVE the drink markers,
+  // one per band at its midpoint, with a thin stem down to the plot -- the same
+  // "tags float above the chart" idea as the drinks. Workouts don't crowd the
+  // way rounds of drinks do (a day has one or two, hours apart), so one row is
+  // enough; a genuinely close pair is just nudged apart horizontally. The
+  // number is the session's caption index (app.js's renderDay), so it survives
+  // the sort.
+  const WR = 7, woY = y0 - 44;
+  let woLastX = -1e9;
   woMarks.sort((a, b2) => a.x - b2.x).forEach((m) => {
-    const x = Math.min(Math.max(m.x, x0 + WR), x1 - WR);
-    woRow = x - woLastX < WR * 2 + 2 ? 1 - woRow : 0;
+    let x = Math.min(Math.max(m.x, x0 + WR), x1 - WR);
+    if (x - woLastX < WR * 2 + 1) x = Math.min(woLastX + WR * 2 + 1, x1 - WR);
     woLastX = x;
-    const cy = WROWS[woRow];
-    p += `<circle cx="${x.toFixed(1)}" cy="${cy}" r="${WR}" fill="${col("workout")}" data-tip="${esc(m.tip)}"/>
-      ${txt(x, cy + 3.4, m.n, { size: 9, anchor: "middle", fill: "bg", weight: 700 })}`;
+    p += `<line x1="${x.toFixed(1)}" y1="${(woY + WR).toFixed(1)}" x2="${x.toFixed(1)}" y2="${y0}" stroke="${col("workout")}" stroke-width="1" opacity=".4"/>
+      <circle cx="${x.toFixed(1)}" cy="${woY}" r="${WR}" fill="${col("workout")}" data-tip="${esc(m.tip)}"/>
+      ${txt(x, woY + 3.4, m.n, { size: 9, anchor: "middle", fill: "bg", weight: 700 })}`;
   });
 
   // Hit bands are on the same time scale as everything else, so they stay
@@ -657,7 +663,10 @@ export function strainHistory(W, D, days) {
     hits(n, s, y0, y1 + 20, (i) => {
       const j = i0 + i;
       if (j < 0 || !ok(D.strain[j])) return `no data|${j < 0 ? "—" : dlabelWd(D.dates[j], n)}`;
-      return `${D.strain[j]}|${dlabelWd(D.dates[j], n)} · target ${D.target_lo[j]}–${D.target_hi[j]}${D.drinks[j] ? `|${D.drinks[j]} drinks` : ""}`;
+      // The target range is on the chart already (the shaded band behind the
+      // bars) and in the card's own caption -- spelling it out here too pushed
+      // the readout onto a second line once the weekday went in.
+      return `${D.strain[j]}|${dlabelWd(D.dates[j], n)}${D.drinks[j] ? `|${D.drinks[j]} drinks` : ""}`;
     }, (i) => (ok(D.strain[i0 + i]) ? s.y(D.strain[i0 + i]) : null)) +
     [0, hi / 2, hi].map((v) => txt(x0 - 7, s.y(v) + 4, v.toFixed(0))).join("") +
     dateAxis(W, D.dates, i0, n, s, h - 8) + scrubLayer(y0, y1);

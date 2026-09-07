@@ -940,7 +940,12 @@ function updateDayNav(D, i) {
     else suffix = s ? (failed ? "sync failed" : `synced ${ago(s.at)}`) : "latest";
   }
 
-  $("stamp").textContent = suffix ? `${label} · ${suffix}` : label;
+  // Date on its own line, never broken; the freshness ("synced 54 min ago",
+  // "syncing…", an error) sits under it rather than trailing after a "·" that
+  // used to wrap the date onto two lines once the buttons grew.
+  $("stamp").innerHTML = suffix
+    ? `<span class="d">${label}</span><span class="s">${suffix}</span>`
+    : `<span class="d">${label}</span>`;
   $("stamp").title = latest ? "" : "Back to the latest night";
   $("day-prev").disabled = i <= 0;
   $("day-next").disabled = latest;
