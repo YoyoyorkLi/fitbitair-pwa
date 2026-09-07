@@ -426,9 +426,9 @@ function nightSpan(start, minutes, tLo) {
 
 export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null, hrmax, rhr, session = false }) {
   // y0 is set well below the top edge to leave a margin for the marker tags
-  // that float above the plot -- workout badges on the top row, then up to two
-  // staggered rows of drink badges below them.
-  const h = 250, x0 = padL(W), x1 = W - padR(W), y0 = 54, y1 = 204, yAxis = 226;
+  // that float above the plot: two staggered rows of workout badges, then two
+  // staggered rows of drink badges below them, four rows in all.
+  const h = 262, x0 = padL(W), x1 = W - padR(W), y0 = 66, y1 = 216, yAxis = 238;
   // A night's row has no curve until that sleep session has ended and synced --
   // push.py only computes hr_curve once sleep_start/sleep_end exist. That is
   // the normal state on every first login of the day, not an error.
@@ -543,21 +543,21 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null,
     });
 
   // Workout badges: a numbered dot in the top margin ABOVE the drink markers,
-  // one per band at its midpoint, with a thin stem down to the plot -- the same
-  // "tags float above the chart" idea as the drinks. Workouts don't crowd the
-  // way rounds of drinks do (a day has one or two, hours apart), so one row is
-  // enough; a genuinely close pair is just nudged apart horizontally. The
-  // number is the session's caption index (app.js's renderDay), so it survives
-  // the sort.
-  const WR = 7, woY = y0 - 44;
-  let woLastX = -1e9;
+  // each at its band's TRUE midpoint x so the stem drops straight onto the
+  // band. Auto-detection can log a run of short back-to-back sessions, so the
+  // same two-row stagger the drinks use keeps a close pair from merging
+  // without shoving either off its band. Rows sit 30px above the drink rows,
+  // clear of them. The number is the session's caption index (app.js).
+  const WR = 7, WROWS = [y0 - 42, y0 - 57];
+  let woLastX = -1e9, woRow = 0;
   woMarks.sort((a, b2) => a.x - b2.x).forEach((m) => {
-    let x = Math.min(Math.max(m.x, x0 + WR), x1 - WR);
-    if (x - woLastX < WR * 2 + 1) x = Math.min(woLastX + WR * 2 + 1, x1 - WR);
+    const x = Math.min(Math.max(m.x, x0 + WR), x1 - WR);
+    woRow = x - woLastX < WR * 2 + 2 ? 1 - woRow : 0;
     woLastX = x;
-    p += `<line x1="${x.toFixed(1)}" y1="${(woY + WR).toFixed(1)}" x2="${x.toFixed(1)}" y2="${y0}" stroke="${col("workout")}" stroke-width="1" opacity=".4"/>
-      <circle cx="${x.toFixed(1)}" cy="${woY}" r="${WR}" fill="${col("workout")}" data-tip="${esc(m.tip)}"/>
-      ${txt(x, woY + 3.4, m.n, { size: 9, anchor: "middle", fill: "bg", weight: 700 })}`;
+    const cy = WROWS[woRow];
+    p += `<line x1="${x.toFixed(1)}" y1="${(cy + WR).toFixed(1)}" x2="${x.toFixed(1)}" y2="${y0}" stroke="${col("workout")}" stroke-width="1" opacity=".4"/>
+      <circle cx="${x.toFixed(1)}" cy="${cy}" r="${WR}" fill="${col("workout")}" data-tip="${esc(m.tip)}"/>
+      ${txt(x, cy + 3.4, m.n, { size: 9, anchor: "middle", fill: "bg", weight: 700 })}`;
   });
 
   // Hit bands are on the same time scale as everything else, so they stay
