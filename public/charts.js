@@ -63,6 +63,11 @@ export const clock12 = (t) => {
 };
 /** minute-of-day -> "11 PM" -- hour ticks have no room for the minutes */
 const tick12 = (t) => { const h = Math.floor(wrap(t) / 60); return `${h12(h)}${ampm(h)}`; };
+/** minute-of-day -> "12PM" on the hour, "7:12AM" otherwise -- for tight captions */
+export const clockCompact = (t) => {
+  const m = wrap(t), h = Math.floor(m / 60), mm = m % 60;
+  return `${h12(h)}${mm ? ":" + String(mm).padStart(2, "0") : ""}${ampm(h).trim()}`;
+};
 /** "23:42" -> "11:42 PM" */
 const t12 = (s) => clock12(mins(s));
 
@@ -348,13 +353,11 @@ function bucket(pts, size = BUCKET_MIN) {
 // inventing a fourth palette just for this.
 export const WZONE = [col("light"), col("good"), col("awake"), col("warn")];
 
-// The workout HR CHART is a separate coloring from those bars: an intensity
-// gradient across the same 5 Karvonen bands zone_min already uses everywhere
-// else in the app (day_strain() in metrics.py) -- green at the low end, red
-// at the top, so "how hard was this moment" reads at a glance the way a
-// heart-rate-zone chart conventionally does. Deliberately not tied to
-// WZONE's 4 named bands above: this is a numbered Z1-Z5 gradient, not a
-// recoloring of Fitbit's classification.
+// Every heart-rate line in the app is coloured per-segment by which of the 5
+// Karvonen bands that moment sits in (day_strain() in metrics.py uses the same
+// bands) -- green at the low end, red at the top, so "how hard was this moment"
+// reads at a glance without a zone-shaded background behind it. The old
+// translucent band fill is gone: the line carries the whole story.
 const HR_GRADIENT = ["#3FD68A", "#A3D639", "#F2CB3B", "#F2A93B", "#F2545B"];
 const zoneEdges5 = (rhr, hrmax) => { const res = hrmax - rhr; return [0, 0.6, 0.7, 0.8, 0.9, 1].map((f) => rhr + res * f); };
 const zoneIndex5 = (bpm, edges) => { for (let k = 0; k < 4; k++) { if (bpm < edges[k + 1]) return k; } return 4; };
@@ -372,18 +375,20 @@ const zoneIndex5 = (bpm, edges) => { for (let k = 0; k < 4; k++) { if (bpm < edg
  * Takes an options bag rather than (D, t) because it is drawn for whichever
  * day the stepper is on, not only for the newest row.
  *
- * `zoned` swaps the single-color line and the usual muted Z1-Z5 background
- * for the green-to-red HR_GRADIENT above, with the line itself colored
- * per-segment by zone rather than drawn as one polyline -- used only by the
- * workout detail. Every other caller (the Day tab, heart rate during sleep)
- * is unaffected.
+ * The line is always coloured per-segment by Karvonen zone (HR_GRADIENT) when
+ * hrmax/rhr are known, and drawn as one plain polyline otherwise. There is no
+ * zone-shaded background any more -- it was visual noise the coloured line
+ * already conveyed.
+ *
+ * `session: true` is for a workout or a drinking window rather than a whole
+ * civil day: it skips the 5-minute bucketing (a 20-minute session has too few
+ * samples to bucket) and draws from the stored 1-minute curve as-is.
  */
 // Google's exerciseType enum runs to dozens of values; this covers the ones
 // likely to actually show up from a wrist-worn tracker's auto-detection.
-// Short text, not an emoji glyph -- this app has no icon set anywhere else,
-// so a colored-and-weighted word reads as "this app's own UI" where an
-// emoji (rendered by the OS's own font, not this design) read as a sticker
-// dropped on top of it.
+// Short words, one per session -- the heart-rate chart's workout caption
+// (app.js's renderDay) lists several on one line, so "Walk" and "Run" keep
+// that readable where "Walking workout" and "Running workout" would not.
 const WORKOUT_LABEL = {
   WALKING: "Walk", HIKING: "Hike",
   RUNNING: "Run", JOGGING: "Jog", ELLIPTICAL: "Elliptical",
@@ -397,7 +402,7 @@ const WORKOUT_LABEL = {
 };
 // Falls back to the type's own first word, title-cased, for anything
 // Google's enum throws at this that isn't in the map above.
-const workoutLabel = (type) => WORKOUT_LABEL[String(type || "").toUpperCase()]
+export const workoutLabel = (type) => WORKOUT_LABEL[String(type || "").toUpperCase()]
   || String(type || "Workout").toLowerCase().split("_")[0].replace(/^./, (c) => c.toUpperCase());
 
 // A night's own "start" clock time is filed under its WAKE date
@@ -415,7 +420,7 @@ function nightSpan(start, minutes, tLo) {
   return [e - minutes, e];
 }
 
-export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null, hrmax, rhr, zoned = false }) {
+export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null, hrmax, rhr, session = false }) {
   const h = 232, x0 = padL(W), x1 = W - padR(W), y0 = 36, y1 = 186, yAxis = 208;
   // A night's row has no curve until that sleep session has ended and synced --
   // push.py only computes hr_curve once sleep_start/sleep_end exist. That is
@@ -429,8 +434,8 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null,
   // throw away most of the detail a short session actually has -- a 22-minute
   // walk has only 22 raw samples to begin with, and bucketing to 5-minute
   // means would leave ~4 points. push.py already stores hr_curve at 1-minute
-  // resolution, so zoned charts just draw it as-is.
-  const pts = zoned ? curve : bucket(curve);
+  // resolution, so session charts just draw it as-is.
+  const pts = session ? curve : bucket(curve);
   const b = pts.map((p) => p[1]), lo = Math.min(...b) - 8, hi = Math.max(...b) + 8;
   const t = unroll(pts.map((p) => p[0]), mins(pts[0][0]));
   const span = t[t.length - 1] - t[0] || 1;
@@ -441,16 +446,10 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null,
   const Y = (v) => y1 - ((v - lo) / ((hi - lo) || 1)) * (y1 - y0);
 
   let p = "";
-  // Same 5-band edges either way -- zoned only changes which palette paints
-  // them and whether the line itself is one of the two below.
+  // The 5 Karvonen edges, used to colour the line below per-segment. Null when
+  // this day's resting HR has not synced yet -- the line then falls back to a
+  // single stroke. No shaded background is drawn from these any more.
   const edges = ok(hrmax) && ok(rhr) ? zoneEdges5(rhr, hrmax) : null;
-  if (edges) {
-    const palette = zoned ? HR_GRADIENT : ZONE;
-    for (let i = 0; i < 5; i++) {
-      const yT = Y(Math.min(edges[i + 1], hi)), yB = Y(Math.max(edges[i], lo));
-      if (yB > yT) p += `<rect x="${x0}" y="${yT.toFixed(1)}" width="${x1 - x0}" height="${(yB - yT).toFixed(1)}" fill="${palette[i]}" opacity=".16"/>`;
-    }
-  }
   // Chart's own clock window -- clips both the workout bands below and the
   // drink markers further down, so declared once rather than twice.
   const tLo = t[0], tHi = t[t.length - 1];
@@ -474,11 +473,13 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null,
   // wrap lands at the same continuous-minute position the curve itself does;
   // clipping to [tLo, tHi] lets a session that runs past this chart's own
   // window just end at its edge instead of needing next-day data it doesn't have.
-  // Icons are collected here but drawn later, on top of the HR line (see
-  // below) rather than under it, so the type reads at a glance without
-  // needing to tap -- "without crowding the UI" ruled out a text label.
-  const woIcons = [];
-  workouts.forEach((w) => {
+  // Each band gets a NUMBERED badge at its top (drawn later, over the line);
+  // the number matches this session's entry in the chart's caption below
+  // (app.js's renderDay). A spelled-out on-chart label was tried and abandoned
+  // -- two sessions an hour apart overlapped into an unreadable smear exactly
+  // where the HR trace peaks -- but a single digit is small enough to survive.
+  const woMarks = [];
+  workouts.forEach((w, wi) => {
     const s = unroll([w.start], tLo)[0];
     const e = s + (Number(w.min) || 0);
     if (e < tLo || s > tHi) return;
@@ -486,11 +487,11 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null,
     const label = String(w.type || "Workout").toLowerCase().replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
     p += `<rect x="${xs.toFixed(1)}" y="${y0}" width="${Math.max(xe - xs, 1.5).toFixed(1)}" height="${y1 - y0}"
       fill="${col("workout")}" opacity=".2" data-tip="${esc(`${label}|${clock12(s)}–${clock12(e)}`)}"/>`;
-    woIcons.push({ x: (xs + xe) / 2, type: w.type });
+    woMarks.push({ x: (xs + xe) / 2, n: wi + 1, tip: `${label}|${clock12(s)}–${clock12(e)}` });
   });
 
   p += grid(x0, x1, [y0, (y0 + y1) / 2, y1]);
-  if (zoned && edges) {
+  if (edges) {
     // One short segment per consecutive pair rather than one polyline: SVG
     // has no per-vertex stroke color, so a line whose color tracks the zone
     // it's passing through has to be built out of many single-color pieces.
@@ -506,18 +507,6 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null,
     p += `<polyline points="${pts.map((q, i) => `${X(t[i]).toFixed(1)},${Y(q[1]).toFixed(1)}`).join(" ")}"
       fill="none" stroke="${col("strain")}" stroke-width="1.5" stroke-linejoin="round"/>`;
   }
-
-  // Drawn on top of the line (not with the band rects above it), so the
-  // label reads clearly regardless of what the HR trace is doing underneath
-  // it. The stroke-as-halo (paint-order flips fill/stroke drawing order)
-  // does that without a background pill, which would need its own width
-  // math per label; pointer-events:none keeps it out of the way of the
-  // band's own tap target.
-  woIcons.forEach(({ x, type }) => {
-    p += `<text x="${x.toFixed(1)}" y="${y0 + 15}" font-size="10" font-weight="700" font-family="${SANS}"
-      text-anchor="middle" fill="${col("text")}" stroke="${col("panel")}" stroke-width="3" paint-order="stroke"
-      pointer-events="none">${esc(workoutLabel(type))}</text>`;
-  });
 
   // Drink markers are selected by WHERE THEY FALL, not by which drinking night
   // they belong to. A session runs 9pm to 1am and a civil day cuts it at
@@ -545,6 +534,21 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null,
         <circle cx="${x.toFixed(1)}" cy="${cy}" r="${R}" fill="${col("drink")}" data-tip="${esc(`Drink ${i + 1}|${t12(d.at)}`)}"/>
         ${txt(x, cy + 3.2, i + 1, { size: 8.5, anchor: "middle", fill: "bg", weight: 700 })}`;
     });
+
+  // Workout badges: a numbered dot at the top of each session's band, over the
+  // HR line so it stays legible whatever the trace is doing. Same two-row
+  // stagger as the drinks above for the rare pair that lands close; the number
+  // is the session's caption index, so it survives the sort.
+  const WR = 7, WROWS = [y0 + 9, y0 + 26];
+  let woLastX = -1e9, woRow = 0;
+  woMarks.sort((a, b2) => a.x - b2.x).forEach((m) => {
+    const x = Math.min(Math.max(m.x, x0 + WR), x1 - WR);
+    woRow = x - woLastX < WR * 2 + 2 ? 1 - woRow : 0;
+    woLastX = x;
+    const cy = WROWS[woRow];
+    p += `<circle cx="${x.toFixed(1)}" cy="${cy}" r="${WR}" fill="${col("workout")}" data-tip="${esc(m.tip)}"/>
+      ${txt(x, cy + 3.4, m.n, { size: 9, anchor: "middle", fill: "bg", weight: 700 })}`;
+  });
 
   // Hit bands are on the same time scale as everything else, so they stay
   // aligned across a gap; `data-x` hands the scrubber the centre directly.

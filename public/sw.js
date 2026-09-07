@@ -9,7 +9,7 @@
 // renaming it is what actually evicts a stale shell. The fetch handler is
 // network-first, so this should never have mattered -- but "should never" has
 // been wrong three times on this bug, and the eviction is free.
-const SHELL = "pulse-shell-v2";
+const SHELL = "pulse-shell-v3";
 const FILES = ["/", "/index.html", "/app.js", "/styles.css", "/manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {

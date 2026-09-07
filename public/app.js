@@ -1028,7 +1028,17 @@ function renderDay() {
         // evening before, so its "start" clock time typically needs to read
         // as yesterday relative to this chart. See nightSpan() in charts.js.
         sleep: showSleep && D.hypnos[i] ? { start: D.hypnos[i].start, min: D.hypnos[i].span } : null,
-      }))}
+      }),
+      // The workout bands carry no spelled-out on-chart label any more -- two
+      // sessions an hour apart overlapped into a smear. Each band gets a
+      // numbered badge; this caption, one session per line, decodes the number
+      // and gives its span. Shown only while the bands are.
+      showWorkouts && D.workouts[i]?.length
+        ? D.workouts[i].map((w, k) => {
+            const s = ch.mins(w.start);
+            return `${k + 1}: ${ch.workoutLabel(w.type)} · ${ch.clockCompact(s)}-${ch.clockCompact(s + (Number(w.min) || 0))}`;
+          }).join("<br>")
+        : "")}
     ${card(`Steps — ${stepsDays} days`, ch.bars(W, D, D.steps, stepsDays, col("steps"), kfmt, "steps"))}
     ${card(`Strain vs target — ${strainDays} days`, ch.strainHistory(W, D, strainDays))}`;
 
@@ -1132,9 +1142,17 @@ function renderDrinksDayBody() {
     <form class="drinkadd" data-add-drink>
       <label class="field"><span>Time</span>
         <input type="time" name="time" value="${defaultDrinkTime(D, i)}" required></label>
-      <button type="submit" class="primary" style="width:auto;padding:13px 18px">Add</button>
+      <button type="submit" class="primary">Add</button>
     </form>
-    ${curve ? card("Heart rate while drinking", ch.hrIntraday(W, { curve, zoned: true, hrmax: D.hrmax, rhr: D.rhr[i] })) : ""}`;
+    ${curve ? card("Heart rate while drinking",
+        // Same numbered drink markers as the Day-tab HR chart; the caption
+        // below spells out which number was when, since a dot on a 4-hour
+        // window is not something you can read a time off.
+        ch.hrIntraday(W, { curve, drinks: D.drinkTimes[i], session: true, hrmax: D.hrmax, rhr: D.rhr[i] }),
+        rows.length
+          ? `Drinks — ${rows.map((r, k) => `${k + 1}. ${r.logged_at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`).join("  ·  ")}`
+          : "")
+      : ""}`;
   primeReadouts($("drinks-day-body"));
 }
 
@@ -1167,13 +1185,27 @@ function drinkNightOf(at, tzName) {
   return new Date(wall - 4 * 3600_000).toISOString().slice(0, 10);
 }
 
+// Re-derive the civil-day drink fields the charts read (marker times, the
+// drinking-window span) from D.drinkRows[i] after a demo-mode edit. The live
+// path gets these from loadLive()/normalize() for free; demo has no server to
+// round-trip, so it keeps them in step here. Deliberately NOT touching
+// D.drinks[i] -- that stays night-keyed and fixture-sourced, same as before.
+function resyncDemoDrinks(D, i) {
+  const day = (D.drinkRows[i] || []).slice().sort((a, b) => a.logged_at - b.logged_at);
+  D.drinkRows[i] = day;
+  D.drinkTimes[i] = day.map((r) =>
+    `${String(r.logged_at.getHours()).padStart(2, "0")}:${String(r.logged_at.getMinutes()).padStart(2, "0")}`);
+  D.firstDrink[i] = day.length ? day[0].logged_at : null;
+  D.lastDrink[i] = day.length ? day[day.length - 1].logged_at : null;
+}
+
 async function addDrink(i, hhmm) {
   const D = DATA, civilDay = D.dates[i];
   const at = drinkTimestamp(civilDay, hhmm);
 
   if (isDemo) {
     (D.drinkRows[i] ??= []).push({ id: `demo-${Date.now()}`, logged_at: at, std_drinks: MANUAL_DRINK_STD });
-    D.drinkRows[i].sort((a, b) => a.logged_at - b.logged_at);
+    resyncDemoDrinks(D, i);
     return render();
   }
   const { error } = await sb.from("drinks").insert({
@@ -1189,6 +1221,7 @@ async function deleteDrink(i, id) {
   const D = DATA;
   if (isDemo || String(id).startsWith("demo-")) {
     D.drinkRows[i] = (D.drinkRows[i] || []).filter((r) => r.id !== id);
+    resyncDemoDrinks(D, i);
     return render();
   }
   const { error } = await sb.from("drinks").delete().eq("id", id);
@@ -1396,7 +1429,7 @@ function workoutCard(D, i, w, idx) {
     <div class="wexpand" id="wexpand-${idx}" hidden>
       <div class="detlist">${rows}</div>
       <div class="readrow"><p class="readout" aria-live="polite"></p>${stepper}</div>
-      <div class="chartbox scrubbable">${ch.hrIntraday(W, { curve, hrmax: D.hrmax, rhr: D.rhr[i], zoned: true })}</div>
+      <div class="chartbox scrubbable">${ch.hrIntraday(W, { curve, hrmax: D.hrmax, rhr: D.rhr[i], session: true })}</div>
       ${zoneBars(w.zones)}
     </div>
   </div>`;

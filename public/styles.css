@@ -24,9 +24,9 @@ a{color:var(--accent)}
 /* Night selector. Meets Apple's 44px touch-target advice now that there is no
    brand wordmark left to crowd off a 320px screen for it. Arrow keys and the
    swipe gesture are the other two ways in. */
-.daynav{display:flex;align-items:center;gap:4px}
+.daynav{display:flex;align-items:center;gap:5px}
 .nav{background:var(--panel);border:1px solid var(--grid);color:var(--text);
-  width:44px;height:44px;line-height:1;font-size:23px;padding:0;border-radius:8px;
+  width:52px;height:52px;line-height:1;font-size:27px;padding:0;border-radius:9px;
   display:flex;align-items:center;justify-content:center}
 .nav:disabled{opacity:.32;cursor:default}
 .stamp{background:none;border:0;color:var(--muted);font:inherit;font-size:12.5px;
@@ -36,7 +36,7 @@ a{color:var(--accent)}
 
 /* Sync now. Set apart from the ‹ › pair so a thumb reaching for "previous"
    does not start a four-minute job by accident. */
-.sync{margin-left:8px;font-size:19px;color:var(--muted)}
+.sync{margin-left:8px;font-size:23px;color:var(--muted)}
 /* Static on purpose. A spinner implies this page is doing the work; it is not
    -- the run is on GitHub and takes ~4 minutes, so an animation here would be
    four minutes of motion signifying nothing. The colour change plus "syncing…"
@@ -216,9 +216,16 @@ a{color:var(--accent)}
   width:34px;height:34px;font-size:17px;line-height:1;flex:none;
   -webkit-tap-highlight-color:transparent}
 .drdel:active{color:var(--warn);border-color:var(--warn)}
-.drinkadd{display:flex;gap:8px;align-items:flex-end}
-.drinkadd .field{flex:1;margin:0}
+/* min-width:0 on the flex item is the fix for the overlap: a native
+   <input type="time"> reports a wide min-content size, and without this the
+   field refused to shrink below it — so the field and the Add button both sat
+   at their intrinsic widths, overflowed the row, and the button rode up over
+   the input's right edge. */
+.drinkadd{display:flex;gap:10px;align-items:flex-end}
+.drinkadd .field{flex:1 1 auto;min-width:0;margin:0}
 .drinkadd .field span{font-size:12px}
+.drinkadd input{min-width:0}
+.drinkadd button.primary{flex:0 0 auto;width:auto;padding:14px 20px}
 
 /* #workout-day's per-workout cards: collapsed to time/duration/calories,
    expanding on tap to the heart-rate chart and zone breakdown. The summary
@@ -372,7 +379,7 @@ h1{font-size:22px;font-weight:600;letter-spacing:-.01em;margin:0}
   }
 }
 @media (max-width:360px){
-  .daynav{gap:0}
-  .nav{width:40px;height:40px;font-size:21px}
+  .daynav{gap:2px}
+  .nav{width:46px;height:46px;font-size:24px}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
