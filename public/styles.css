@@ -219,15 +219,17 @@ a{color:var(--accent)}
   width:34px;height:34px;font-size:17px;line-height:1;flex:none;
   -webkit-tap-highlight-color:transparent}
 .drdel:active{color:var(--warn);border-color:var(--warn)}
-/* Stacked, not a row. Side-by-side kept overlapping on iOS however the flex
-   was tuned -- a native <input type="time"> paints its own wide control and
-   does not honour the box it's given. Time input on top, Add below it; nothing
-   to collide. */
-.drinkadd{display:flex;flex-direction:column;gap:12px;align-items:flex-start}
-.drinkadd .field{margin:0;width:100%}
+/* One row: [ Time ] [ Add ]. The earlier stacked layout was a workaround for a
+   native <input type="time"> that ignores a percentage / flex-grow width on
+   iOS and paints itself wide -- an EXPLICIT px width it does honour, so the
+   field is a fixed size and the button sits beside it. flex-wrap is the
+   safety net on a very narrow viewport. margin-bottom keeps the heart-rate
+   card below from touching the button. */
+.drinkadd{display:flex;flex-flow:row wrap;gap:10px 14px;align-items:flex-end;margin-bottom:20px}
+.drinkadd .field{margin:0;flex:0 0 auto}
 .drinkadd .field span{font-size:12px}
-.drinkadd input{width:100%}
-.drinkadd button.primary{width:auto;padding:13px 30px}
+.drinkadd input{width:150px}
+.drinkadd button.primary{width:auto;padding:13px 28px;flex:0 0 auto}
 
 /* #workout-day's per-workout cards: collapsed to time/duration/calories,
    expanding on tap to the heart-rate chart and zone breakdown. The summary
