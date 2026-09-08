@@ -155,8 +155,9 @@ def compute(con=None):
             hr_all = hr_all[hr_all["day"] > cut]
     strain_df = strain_df.drop(columns=["n"])
 
+    naps = mx.nap_minutes(nights_all, nights)
     sf = mx.sleep_series(nights, dict(zip(strain_df["date"], strain_df["strain"])),
-                         hrv_map, rhr_map)
+                         hrv_map, rhr_map, naps)
 
     recs = []
     for i, r in sf.iterrows():

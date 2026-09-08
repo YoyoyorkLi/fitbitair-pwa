@@ -168,6 +168,36 @@ def strain_ceiling_scales_with_recovery():
 
 
 @case
+def naps_credit_debt_not_score():
+    """A nap cuts sleep debt and lifts recovery's perf term, but does not
+    touch the main night's sleep score."""
+    base = pd.Timestamp("2026-08-20 23:15:00")
+    nights_all, mains = [], []
+    for i in range(16):
+        start = base + pd.Timedelta(days=i)
+        n = _night(395, rem=95, deep=75, awake_segs=[1], start=start)  # ~25 min short
+        nights_all.append(n)
+        mains.append(n)
+        if i == 10:                                   # a 100-min nap the afternoon
+            nap_start = n["end"].normalize() + pd.Timedelta(hours=14)   # of the wake day
+            nights_all.append(_night(100, rem=8, deep=20, awake_segs=[], start=nap_start))
+
+    naps = mx.nap_minutes(nights_all, mains)
+    nap_day = mains[10]["end"].normalize()
+    assert naps.get(nap_day) == 100.0, naps
+
+    no_nap = mx.sleep_series(mains, {}, None, None, None)
+    with_nap = mx.sleep_series(mains, {}, None, None, naps)
+    # the nap night's score is unchanged (main sleep identical)...
+    assert no_nap["score"].iloc[10] == with_nap["score"].iloc[10]
+    # ...but debt on that night and the days after it is lower
+    assert with_nap["debt"].iloc[10] < no_nap["debt"].iloc[10] - 30
+    assert with_nap["debt"].iloc[13] < no_nap["debt"].iloc[13]
+    # and perf (the recovery input) rose
+    assert with_nap["perf"].iloc[10] > no_nap["perf"].iloc[10]
+
+
+@case
 def sleep_series_end_to_end():
     nights = []
     base = pd.Timestamp("2026-08-20 23:15:00")

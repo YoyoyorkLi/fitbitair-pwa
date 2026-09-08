@@ -1172,10 +1172,11 @@ function renderDrinksDayBody() {
     ${curve ? card("Heart rate while drinking",
         // Same numbered drink markers as the Day-tab HR chart; the caption
         // below spells out which number was when, since a dot on a 4-hour
-        // window is not something you can read a time off.
+        // window is not something you can read a time off. One drink per
+        // line -- a single row ran off the edge past ~4 drinks.
         ch.hrIntraday(W, { curve, drinks: D.drinkTimes[i], session: true, hrmax: D.hrmax, rhr: D.rhr[i] }),
         rows.length
-          ? `Drinks — ${rows.map((r, k) => `${k + 1}. ${r.logged_at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`).join("  ·  ")}`
+          ? rows.map((r, k) => `Drink ${k + 1}: ${r.logged_at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`).join("<br>")
           : "")
       : ""}`;
   primeReadouts($("drinks-day-body"));

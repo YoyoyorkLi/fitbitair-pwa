@@ -72,6 +72,24 @@ Why this shape (RISE's model + the chronic-sleep-restriction literature):
 - Advisory only. It drives "aim for 7.5 h tonight" nudges; it does **not** dock
   the sleep score.
 
+### Naps
+
+`main_sleeps()` keeps one session per day (the longest) so a nap can't render
+as "last night" and wreck the stage numbers. But `nap_minutes()` collects every
+session it rejected — keyed to the civil day it started — and those minutes
+**do** count:
+
+- added to `asleep_total`, which is what **sleep debt** and **`perf`** (the
+  recovery sleep term) are computed from. A 90-min nap offsets 90 min of that
+  day's shortfall.
+- **not** added to the sleep **score** — that's one main night's architecture,
+  which a nap can't retroactively change.
+
+Sessions under 10 min are dropped (a "21 min, 8 asleep" wake-up blip is noise).
+The Fitbit Air only logs a nap it detects — roughly 45 min+ of sustained
+stillness — so short couch naps are invisible to this and simply don't get
+credited.
+
 ## Sleep score
 
 `sleep_score()` — **quality × how much of `need` you actually slept:**
