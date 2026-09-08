@@ -1,12 +1,14 @@
-// Trigger the hourly sync on demand.
+// Trigger the sync on demand.
 //
 //   POST /api/sync
-//     Authorization: Bearer <supabase access token>
+//     Authorization: Bearer <supabase access token>   (the app's sync button)
+//     x-sync-key: <SYNC_KEY>                           (an external cron pinger)
 //     -> 202 {"ok":true,"run":"dispatched"}
 //
-// Why this endpoint exists at all: GitHub's schedule is best-effort. The cron
-// asks for hourly and observed gaps are 2.5-4h, so the number on screen can be
-// hours old with nothing wrong. This is the "no, now" button.
+// Why this endpoint exists at all: GitHub's schedule is best-effort and, on a
+// low-traffic repo, badly so -- an hourly cron has landed every 3-6h. This is
+// the "no, now" button for the app, and the hook for a real external
+// scheduler (cron-job.org etc.) that hits it with SYNC_KEY every hour.
 //
 // Why it cannot live in the browser: dispatching a workflow needs a GitHub
 // token with Actions:write. The PWA runs on the anon key, which is public by
@@ -17,6 +19,8 @@
 // The work itself does NOT happen here. This returns as soon as GitHub accepts
 // the dispatch; the ~4 minutes of syncing runs on GitHub's infrastructure. The
 // phone can lock, the app can close, the tab can die -- the data still lands.
+
+import { timingSafeEqual } from "node:crypto";
 
 const GH = "https://api.github.com";
 const UA = "pulse-pwa";                 // GitHub rejects requests without one
@@ -85,16 +89,27 @@ export default async function handler(req, res) {
     return json(res, 500, { error: "server misconfigured" });
   }
 
-  let signedIn;
-  try {
-    signedIn = await callerIsSignedIn(req);
-  } catch (err) {
-    console.error("sync: auth check failed:", err.message);
-    return json(res, 500, { error: "server misconfigured" });
+  // Two ways in. The app's sync button proves a signed-in Supabase session.
+  // An external cron pinger (GitHub's own scheduler is unreliable on a
+  // low-traffic repo -- observed hourly gaps of 3-6h) sends a shared SYNC_KEY
+  // header instead; if SYNC_KEY is unset, that path simply doesn't exist.
+  let authorised = false;
+  const syncKey = process.env.SYNC_KEY || "";
+  const offered = req.headers["x-sync-key"];
+  if (syncKey && typeof offered === "string" && offered.length === syncKey.length &&
+      timingSafeEqual(Buffer.from(offered), Buffer.from(syncKey))) {
+    authorised = true;
+  } else {
+    try {
+      authorised = await callerIsSignedIn(req);
+    } catch (err) {
+      console.error("sync: auth check failed:", err.message);
+      return json(res, 500, { error: "server misconfigured" });
+    }
   }
   // Sign-ups are disabled in Supabase (see sql/schema.sql), so "authenticated"
   // is the account holder and nobody else. No per-user check needed here.
-  if (!signedIn) return json(res, 401, { error: "sign in first" });
+  if (!authorised) return json(res, 401, { error: "sign in first" });
 
   try {
     if (await runInFlight(slug, token)) {
