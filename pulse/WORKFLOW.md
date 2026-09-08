@@ -520,23 +520,27 @@ Bare `python -m pulse` prints help and touches nothing.
 
 ## What each number means
 
+Full write-up, with the constants and the research behind them, in
+**[METRICS.md](METRICS.md)**. The short version:
+
 ### The three headline KPIs
 
 | KPI | Range | How it is computed |
 |---|---|---|
-| **Day strain** | 0–21 | Banister TRIMP-exp integrated over every heart-rate sample, then log-compressed. Passive time is included, so a sedentary day still scores. The green arc is your recovery-scaled target. |
+| **Day strain** | 0–21 | Banister TRIMP-exp over the day's **waking** heart rate, log-compressed. Sleep is excluded — an elevated overnight resting HR is recovery cost, not training load. The line on the history chart is your recovery-scaled **ceiling**, a number to stay under. |
 | **Recovery** | 0–100 | 55% HRV + 25% inverted resting HR + 20% sleep performance, each a z-score against your own trailing 30-day baseline. |
-| **Sleep score** | 0–100 | Google's April-2026 six metrics rebuilt from the stage array: duration 50, sound sleep 15, time-to-sound 10, restlessness 10, interruptions 10, full awakenings 5. |
+| **Sleep score** | 0–100 | **quality × how much of your `need` you slept.** quality = "how well you slept" (efficiency, REM/deep vs your own recent normal, wake-ups, timing — 65%) + "how settled your body got" (overnight HRV / resting HR vs baseline — 35%). A short night is capped however clean it was; a drinking night is docked through its real signal, not a per-drink penalty. |
 
 ### Everything else
 
 | Metric | How |
 |---|---|
 | **Zones** | Karvonen heart-rate *reserve* from today's resting HR and Tanaka HRmax (208 − 0.7 × age), not the 220 − age shortcut. Five buckets that tile the whole day, so they sum to your recording time. |
-| **Target strain** | `8 + 0.10 × recovery`, ±1.5. Recovery 90 → 15.5–18.5. |
-| **Sleep debt** | `0.88 × yesterday + (need − asleep)`, capped at 10 h. Need = 8 h + a surcharge for yesterday's strain above 10. |
+| **Strain ceiling** | `6.0 + 0.09 × recovery`. Recovery 100 → 15.0, 50 → 10.5. A number to stay under, not a target — undershooting on a bad day is the right call. |
+| **Sleep need** | A flat **7 h** personal baseline (`cfg.SLEEP_NEED_MIN`), plus up to 30 min the night after a hard day. Not the population 8 h, and debt is **not** added in. Your 8 h "goal" is a separate stretch target. |
+| **Sleep debt** | Rolling shortfall vs `need` over the last 14 nights, recent nights weighted heaviest, capped at 5 h. Sleep at `need` and it falls to zero. |
 | **Consistency** | Circular standard deviation of bedtime over 14 nights, mapped to 0–100. Circular maths is required because bedtimes wrap midnight. |
-| **ACWR** | 7-day TRIMP ÷ 28-day TRIMP. 0.8–1.3 is the conventional safe window. |
+| **ACWR** | 7-day TRIMP ÷ 28-day TRIMP (waking-only). 0.8–1.3 is the conventional safe window. |
 
 ---
 
@@ -558,6 +562,15 @@ it sits near neutral by design, not by accident.
 
 **Sleep score needs stage data.** If your Air has only synced `CLASSIC` sleep
 (no hypnogram), that night is skipped. Wear it overnight and sync again.
+
+**Sleep score's "how settled" half needs ~5 nights of HRV.** Until then the
+score is the "how well you slept" half alone, and the REM/deep components use
+fixed healthy ranges rather than your own baseline (which needs ~7 nights).
+
+**A `metrics.py` change needs a full re-sync.** The Supabase rows are computed
+at sync time, so retuning a constant only takes effect for nights synced after.
+Actions → Run workflow → **full: true** re-pulls 90 days and re-pushes every
+night.
 
 ---
 

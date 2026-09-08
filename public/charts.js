@@ -660,10 +660,13 @@ export function bars(W, D, vals, days, color, fmt, unit) {
 export function strainHistory(W, D, days) {
   const n = Math.max(1, Math.min(days, D.dates.length));
   const h = 210, x0 = padL(W), x1 = W - padR(W), y0 = 14, y1 = 158, i0 = D.dates.length - n;
-  const pool = [...D.strain.slice(i0), ...D.target_hi.slice(i0)].filter(ok);
+  // `D.target` is the recovery-scaled ceiling — a line to stay under, not a
+  // band to fill. Older fixtures may lack it; fall back to a flat 13.
+  const tgt = (j) => (Array.isArray(D.target) && ok(D.target[j]) ? D.target[j] : 13);
+  const pool = [...D.strain.slice(i0), ...D.dates.slice(i0).map((_, k) => tgt(i0 + k))].filter(ok);
   const hi = (pool.length ? Math.max(...pool) : 18) + 2;
   const s = scales(x0, x1, y0, y1, n, 0, hi), bw = Math.max(3, Math.min(20, (x1 - x0) / n - 5));
-  let band = "", bar = "", mk = "";
+  let ceil = "", bar = "", mk = "";
   for (let i = 0; i < n; i++) {
     // j goes negative whenever fewer than `n` nights of data exist yet --
     // requesting 21 days with 6 real nights is the normal state for the
@@ -672,28 +675,24 @@ export function strainHistory(W, D, days) {
     // coordinate. Skip rather than draw a broken bar.
     const j = i0 + i;
     if (j < 0 || !ok(D.strain[j])) continue;
-    const cx = s.x(i), v = D.strain[j];
-    if (ok(D.target_hi[j]) && ok(D.target_lo[j])) {
-      band += `<rect x="${(cx - bw / 2 - 2).toFixed(1)}" y="${s.y(D.target_hi[j]).toFixed(1)}" width="${(bw + 4).toFixed(1)}"
-        height="${Math.max(0, s.y(D.target_lo[j]) - s.y(D.target_hi[j])).toFixed(1)}" fill="${col("good")}" opacity=".14"/>`;
-    }
+    const cx = s.x(i), v = D.strain[j], c = tgt(j);
+    // A short tick at the ceiling above each bar.
+    ceil += `<line x1="${(cx - bw / 2 - 2).toFixed(1)}" y1="${s.y(c).toFixed(1)}"
+      x2="${(cx + bw / 2 + 2).toFixed(1)}" y2="${s.y(c).toFixed(1)}" stroke="${col("good")}" stroke-width="2" opacity=".5"/>`;
     bar += `<rect x="${(cx - bw / 2).toFixed(1)}" y="${s.y(v).toFixed(1)}" width="${bw.toFixed(1)}"
-      height="${Math.max(1, y1 - s.y(v)).toFixed(1)}" rx="3" fill="${v > D.target_hi[j] ? col("warn") : col("strain")}"/>`;
+      height="${Math.max(1, y1 - s.y(v)).toFixed(1)}" rx="3" fill="${v > c ? col("warn") : col("strain")}"/>`;
     if (D.drinks[j]) mk += `<circle cx="${cx.toFixed(1)}" cy="${y1 + 13}" r="4.5" fill="${col("drink")}"/>
       ${txt(cx, y1 + 16.5, D.drinks[j], { size: 7, anchor: "middle", fill: "bg", weight: 700 })}`;
   }
-  const p = grid(x0, x1, [y0, (y0 + y1) / 2, y1]) + band + bar + axis(x0, x1, y1) + mk +
+  const p = grid(x0, x1, [y0, (y0 + y1) / 2, y1]) + ceil + bar + axis(x0, x1, y1) + mk +
     hits(n, s, y0, y1 + 20, (i) => {
       const j = i0 + i;
       if (j < 0 || !ok(D.strain[j])) return `no data|${j < 0 ? "—" : dlabelWd(D.dates[j], n)}`;
-      // The target range is on the chart already (the shaded band behind the
-      // bars) and in the card's own caption -- spelling it out here too pushed
-      // the readout onto a second line once the weekday went in.
-      return `${D.strain[j]}|${dlabelWd(D.dates[j], n)}${D.drinks[j] ? `|${D.drinks[j]} drinks` : ""}`;
+      return `${D.strain[j]}|${dlabelWd(D.dates[j], n)} · under ${tgt(j)}${D.drinks[j] ? ` · ${D.drinks[j]} drinks` : ""}`;
     }, (i) => (ok(D.strain[i0 + i]) ? s.y(D.strain[i0 + i]) : null)) +
     [0, hi / 2, hi].map((v) => txt(x0 - 7, s.y(v) + 4, v.toFixed(0))).join("") +
     dateAxis(W, D.dates, i0, n, s, h - 8) + scrubLayer(y0, y1);
-  return svg(W, h, p, "Strain against the recovery-scaled target band", "day");
+  return svg(W, h, p, "Strain against the recovery-scaled ceiling", "day");
 }
 
 export function stagesVsBaseline(W, D, t) {

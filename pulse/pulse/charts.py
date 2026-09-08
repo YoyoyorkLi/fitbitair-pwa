@@ -198,27 +198,30 @@ LABEL_Y = 128          # shared baseline so the three KPI labels line up
 SUB_Y = 144
 
 
-def strain_gauge(strain, lo, hi, smax=21, w=KPI_W, h=KPI_H):
+def strain_gauge(strain, ceiling, smax=21, w=KPI_W, h=KPI_H):
     cx, cy, r = w / 2, 100, 58
     a0, a1 = np.pi, 2 * np.pi
     smax = max(smax, 1)
+    hi = ceiling
 
     def f(v):
         return a0 + (a1 - a0) * float(np.clip(v / smax, 0, 1))
 
+    over = bool(strain and hi and strain > hi)
     p = [f'<path d="{_arc(cx, cy, r, a0, a1)}" stroke="{C["panel2"]}" stroke-width="11" '
          f'fill="none" stroke-linecap="round"/>',
-         f'<path d="{_arc(cx, cy, r, f(lo), max(f(hi), f(lo) + .01))}" '
+         f'<path d="{_arc(cx, cy, r, a0, max(f(hi), a0 + .01))}" '
          f'stroke="{C["good"]}" stroke-width="11" fill="none" opacity=".32" '
-         f'data-tip="Target strain {lo}\u2013{hi} for today\u0027s recovery"/>',
+         f'data-tip="Stay under {hi} today, scaled to your recovery"/>',
          f'<path d="{_arc(cx, cy, r, a0, max(f(strain), a0 + .01))}" '
-         f'stroke="{C["strain"]}" stroke-width="11" fill="none" stroke-linecap="round"/>',
+         f'stroke="{C["warn"] if over else C["strain"]}" stroke-width="11" '
+         f'fill="none" stroke-linecap="round"/>',
          f'<text x="{cx}" y="{cy - 10}" text-anchor="middle" font-size="36" '
          f'font-weight="700" fill="{C["text"]}">{strain}</text>',
          f'<text x="{cx}" y="{LABEL_Y}" text-anchor="middle" font-size="12" '
          f'fill="{C["muted"]}" letter-spacing="1.1">DAY STRAIN</text>',
          f'<text x="{cx}" y="{SUB_Y}" text-anchor="middle" font-size="11.5" '
-         f'fill="{C["good"]}">target {lo}\u2013{hi}</text>']
+         f'fill="{C["warn"] if over else C["good"]}">under {hi}</text>']
     return _svg(w, h, "".join(p))
 
 
@@ -271,21 +274,23 @@ def strain_history(m, w=680, h=180):
     n = len(d)
     bw = iw / n * 0.62
     smax = 21
+    ceil_col = "target"
     p = []
+    # The recovery-scaled ceiling as a short tick over each bar -- a line to
+    # stay under, not a band to fill.
     for i, r in d.iterrows():
         xc = pad_l + (i + .5) / n * iw
-        yl = pad_t + ih * (1 - min(r["target_hi"] / smax, 1))
-        yh = pad_t + ih * (1 - min(r["target_lo"] / smax, 1))
-        p.append(f'<rect x="{xc - bw/2 - 2:.1f}" y="{yl:.1f}" width="{bw + 4:.1f}" '
-                 f'height="{max(yh - yl, 1):.1f}" fill="{C["good"]}" opacity=".16"/>')
+        yc = pad_t + ih * (1 - min(float(r[ceil_col]) / smax, 1))
+        p.append(f'<line x1="{xc - bw/2 - 2:.1f}" y1="{yc:.1f}" x2="{xc + bw/2 + 2:.1f}" '
+                 f'y2="{yc:.1f}" stroke="{C["good"]}" stroke-width="2" opacity=".5"/>')
     for i, r in d.iterrows():
         xc = pad_l + (i + .5) / n * iw
         hh = ih * float(np.clip(r["strain"] / smax, 0, 1))
-        col = C["warn"] if r["strain"] > r["target_hi"] else C["strain"]
+        col = C["warn"] if r["strain"] > float(r[ceil_col]) else C["strain"]
         p.append(f'<rect x="{xc - bw/2:.1f}" y="{pad_t + ih - hh:.1f}" width="{bw:.1f}" '
                  f'height="{hh:.1f}" rx="2" fill="{col}" '
                  f'data-tip="{r["date"]:%a %d %b}|strain {r["strain"]:.1f} \u00b7 '
-                 f'target {r["target_lo"]}\u2013{r["target_hi"]}|'
+                 f'under {float(r[ceil_col]):.1f}|'
                  f'recovery {int(r["recovery"])}%"/>')
         if i % 4 == 0:
             p.append(f'<text x="{xc:.1f}" y="{h - 6}" text-anchor="middle" '

@@ -40,9 +40,31 @@ TOKEN_FILE = ROOT / ".token.json"
 AGE = int(os.getenv("PULSE_AGE", "23"))
 SEX = os.getenv("PULSE_SEX", "M")        # "M"/"F" -> TRIMP weighting constant
 HR_MAX = None                            # None -> Tanaka estimate from age
-SLEEP_NEED_BASE_MIN = 480                # 8h baseline need
 BASELINE_DAYS = 30                       # rolling window for HRV/RHR/stage norms
 STRAIN_SCALE = 21                        # 21 = WHOOP axis; 100 = Bevel percent
+
+# ---- sleep need / goal / debt ----------------------------------------------
+# NEED is your biological baseline -- what keeps you non-impaired, and the
+# number the sleep score divides by. Set it to what you actually run well on,
+# not the population 8h: chronic short sleep makes you *feel* adapted while
+# staying measurably impaired, but for a personal tool "I feel good on 7" is a
+# reasonable call, and anchoring NEED an hour too high makes every score look
+# worse than the night was and pins sleep debt at its ceiling forever.
+#
+# GOAL is aspirational -- a target line on the charts and a "nights hit" count.
+# It never touches the score or the debt.
+SLEEP_NEED_MIN = 420                     # 7h -- personal baseline (was 8h)
+SLEEP_GOAL_MIN = 480                     # 8h -- display-only stretch target
+SLEEP_NEED_HARDDAY_MAX = 30             # up to +30 min the night after a hard day
+
+# Sleep debt: a rolling shortfall over the last N nights vs NEED, recent nights
+# weighted heaviest, capped. Matches how sleep debt actually behaves (RISE,
+# CSR literature): it accrues over ~2 weeks and fades over ~2 weeks, and it can
+# reach zero -- so it means something -- when you are consistently at NEED.
+# The old leaky-bucket accumulator never emptied and pinned near its 10h cap.
+SLEEP_DEBT_WINDOW = 14                   # nights in the rolling window
+SLEEP_DEBT_CAP_MIN = 300                 # 5h -- RISE's "manageable" ceiling
+SLEEP_DEBT_SURPLUS_CREDIT = 0.5          # a night over NEED pays down at half rate
 
 # The API returns every point as a UTC instant. Without a zone, a Chicago
 # evening (UTC-5) lands on the following UTC day and every evening workout is

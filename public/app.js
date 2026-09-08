@@ -566,6 +566,9 @@ function normalize(D) {
     ? D.workout_nights.map((v) => v || [])
     : only(D.workout_list || []).map((v) => v || []);
 
+  // Older demo.json fixtures carried target_lo/target_hi; derive the single
+  // ceiling from recovery if only those (or neither) are present.
+  D.target ??= (D.recovery || []).map((v) => (ok(v) ? +(6 + 0.09 * v).toFixed(1) : NaN));
   for (const k of ["inBed", "need", "hrvBaseline"]) D[k] ??= [];
   return trimInProgressNight(D);
 }
@@ -589,7 +592,7 @@ function trimInProgressNight(D) {
   if (last <= 0 || ok(D.strain[last])) return D;
   for (const k of ["dates", "hrv", "rhr", "rem", "deep", "light", "awake", "asleep",
                    "inBed", "need", "hrvBaseline", "debt", "score", "recovery", "strain",
-                   "steps", "drinks", "target_lo", "target_hi", "curves", "hypnos",
+                   "steps", "drinks", "target", "curves", "hypnos",
                    "workouts", "drinkTimes", "drinkRows", "firstDrink", "lastDrink"]) {
     if (Array.isArray(D[k])) D[k].pop();
   }
@@ -620,12 +623,13 @@ async function loadLive() {
   const z = [0, 1, 2, 3, 4].map((i) =>
     data.map((r) => (Array.isArray(r.zone_min) ? Number(r.zone_min[i]) || 0 : 0)));
 
-  // Target strain is Bevel's idea, recomputed here rather than stored: it is a
-  // pure function of recovery (metrics.optimal_strain), so storing it would be
-  // a second copy of the same number that could drift.
+  // Strain ceiling: a single number to stay UNDER today, scaled to recovery
+  // (mirrors metrics.strain_ceiling). Recomputed here rather than stored --
+  // it is a pure function of recovery, so a stored copy could only drift.
+  // Undershooting it on a low-recovery day is the right call, not a miss, so
+  // there is no lower bound.
   const rec = num("recovery");
-  const target_lo = rec.map((v) => (ok(v) ? +(8 + 0.1 * v - 1.5).toFixed(1) : NaN));
-  const target_hi = rec.map((v) => (ok(v) ? +(8 + 0.1 * v + 1.5).toFixed(1) : NaN));
+  const target = rec.map((v) => (ok(v) ? +(6 + 0.09 * v).toFixed(1) : NaN));
 
   const D = {
     dates: data.map((r) => r.night),
@@ -637,7 +641,7 @@ async function loadLive() {
     debt: num("sleep_debt_min"), score: num("sleep_score"),
     recovery: rec, strain: num("strain"), steps: num("steps"),
     drinks: data.map((r) => Number(r.drinks || 0)),
-    z, target_lo, target_hi,
+    z, target,
     hrmax: Number(last.hrmax) || 192,
     // Per night, not just the newest one: hr_curve and stages are columns on
     // every row of night_summary and are already in this response (select "*"),
@@ -751,7 +755,7 @@ function dayView(D, i) {
     score: round(at(D.score)),
     hrv: at(D.hrv), hrvBaseline: at(D.hrvBaseline), rhr: round(at(D.rhr)),
     eff: ok(asleep) && inBed > 0 ? Math.round((asleep / inBed) * 100) : NaN,
-    debt: at(D.debt), asleep, need: at(D.need),
+    debt: at(D.debt), asleep, need: at(D.need), target: at(D.target),
     deep: at(D.deep), light: at(D.light), rem: at(D.rem), awake: at(D.awake),
     drinks: Number(D.drinks[i] || 0), steps: at(D.steps),
   };
@@ -1028,9 +1032,9 @@ function renderDay() {
 
   $("today").innerHTML = `
     <div class="kpis">
-      ${kpi(ch.gauge(t.strain, 21, col("strain"), "Day Strain", `Day Strain ${t.strain} of 21|Banister TRIMP over every sample, log-compressed`), "Day Strain", "target 12.6–15.6", "strain")}
+      ${kpi(ch.gauge(t.strain, 21, ok(t.target) && t.strain > t.target ? col("warn") : col("strain"), "Day Strain", `Day Strain ${t.strain} of 21|waking heart-rate load — sleep doesn't count${ok(t.target) ? `|stay under ${t.target} today` : ""}`), "Day Strain", ok(t.target) ? `under ${t.target}` : "", "strain")}
       ${kpi(ch.ring(t.recovery, recCol, "Recovery", `Recovery ${t.recovery}|55% HRV · 25% resting HR · 20% sleep`), "Recovery", `${t.recovery >= 67 ? "well recovered" : t.recovery >= 34 ? "moderate" : "low"}${t.drinks ? ` · ${t.drinks} drink${t.drinks > 1 ? "s" : ""}` : ""}`, "recovery")}
-      ${kpi(ch.ring(t.score, ok(t.score) && t.score >= 80 ? col("good") : col("awake"), "Sleep Score", ok(t.score) ? `Sleep Score ${t.score}|${hm(t.asleep)} asleep of ${hm(t.need)} needed` : "No sleep recorded|this night has not been scored"), "Sleep Score", ok(t.asleep) ? hm(t.asleep) : "not yet", "sleep")}
+      ${kpi(ch.ring(t.score, ok(t.score) && t.score >= 80 ? col("good") : col("awake"), "Sleep Score", ok(t.score) ? `Sleep Score ${t.score}|how well + how settled, × the fraction of ${hm(t.need)} you slept` : "No sleep recorded|this night has not been scored"), "Sleep Score", ok(t.asleep) ? hm(t.asleep) : "not yet", "sleep")}
     </div>
     ${strip}
     <div class="card"><div class="stats">
@@ -1061,7 +1065,7 @@ function renderDay() {
           }).join("<br>")
         : "")}
     ${card(`Steps — ${stepsDays} days`, ch.bars(W, D, D.steps, stepsDays, col("steps"), kfmt, "steps"))}
-    ${card(`Strain vs target — ${strainDays} days`, ch.strainHistory(W, D, strainDays))}`;
+    ${card(`Strain vs ceiling — ${strainDays} days`, ch.strainHistory(W, D, strainDays))}`;
 
   primeReadouts($("dash"));
   if (detailKind) { $("detail-body").innerHTML = renderDetailBody(detailKind); primeReadouts($("detail")); }
@@ -1462,18 +1466,22 @@ function renderDetailBody(kind) {
   if (kind === "strain") {
     const strainDays = win(D, 21, 10), stepsDays = win(D, 30, 14);
     const workouts = D.workouts[i] || [];
+    const over = ok(t.target) && t.strain > t.target;
     return `
-      <div class="detail-dial">${ch.gauge(t.strain, 21, col("strain"), "Day Strain", `Day Strain ${t.strain} of 21|Banister TRIMP over every sample, log-compressed`)}</div>
-      <p class="note center">target <b>12.6–15.6</b>${ok(t.steps) ? ` · <b>${t.steps.toLocaleString()}</b> steps` : ""}</p>
-      ${card(`Strain vs target — ${strainDays} days`, ch.strainHistory(W, D, strainDays))}
+      <div class="detail-dial">${ch.gauge(t.strain, 21, over ? col("warn") : col("strain"), "Day Strain", `Day Strain ${t.strain} of 21|waking heart-rate load only`)}</div>
+      <p class="note center">${ok(t.target) ? `stay under <b>${t.target}</b> today` : ""}${ok(t.steps) ? ` · <b>${t.steps.toLocaleString()}</b> steps` : ""}</p>
+      ${card(`Strain vs ceiling — ${strainDays} days`, ch.strainHistory(W, D, strainDays))}
       ${card("Workouts", workouts.length
         ? `<div class="worklist">${workouts.map((w) => workoutRow(w, i)).join("")}</div>`
         : `<p class="note" style="margin:0">No workouts detected for this day.</p>`, "", false)}
       ${card(`Steps — ${stepsDays} days`, ch.bars(W, D, D.steps, stepsDays, col("steps"), kfmt, "steps"))}
       ${card("Time in zone", `<div class="stats" style="grid-template-columns:repeat(5,1fr)">
         ${[0, 1, 2, 3, 4].map((k) => stat(Math.round(D.z[k]?.[i] || 0) + "m", "Z" + (k + 1), k ? ZONE[k] : null)).join("")}</div>`, "", false)}
-      <p class="note">Strain is Banister TRIMP integrated over every heart-rate sample, so passive
-        activity counts too — workouts above are shown for context, not added on top.</p>`;
+      <p class="note">Strain is your waking heart-rate load — Banister TRIMP over every sample
+        while you're awake, log-compressed. Sleep is left out: an elevated resting heart
+        rate overnight is your body recovering, not training, and it shows up as low
+        recovery instead. The ceiling scales with recovery — a number to stay under on a
+        low-recovery day, not a target to hit.</p>`;
   }
 
   if (kind === "recovery") {
@@ -1499,26 +1507,25 @@ function renderDetailBody(kind) {
   const sIdx = slept ? i : sn.i ?? i;
   const hyp = D.hypnos[sIdx];
   const remDays = win(D, 30, 14), colDays = win(D, 14, 7), debtDays = win(D, 30, 14);
-  // Tonight's target, mirroring sleep_series()'s formula server-side
-  // (metrics.py): an 8h core, plus up to an hour more for today's strain so
-  // far (the "previous day" input the formula wants, from tonight's point of
-  // view), plus up to 90 minutes pulled from whatever debt sn (the last
-  // COMPLETED night) already carries. Only shown on the latest day -- on a
-  // past day "tonight" has no coherent meaning, since that night already
-  // happened and sn.need already says what it needed.
-  const tonightNeed = i === D.dates.length - 1 && ok(D.strain[i]) && ok(sn.debt)
-    ? 480 + Math.min(60, 6 * Math.max(0, D.strain[i] - 10)) + Math.min(90, 0.4 * sn.debt)
+  // Tonight's need, mirroring sleep_series() server-side (metrics.py): a flat
+  // personal baseline (7h) plus up to 30 min the night after a hard day, using
+  // today's strain so far as that "previous day" input. Debt is deliberately
+  // NOT folded in -- it is tracked and shown on its own, not as a moving
+  // target. Only shown on the latest day; a past night's own sn.need already
+  // says what it needed.
+  const NEED_MIN = 420, GOAL_MIN = 480;
+  const tonightNeed = i === D.dates.length - 1 && ok(D.strain[i])
+    ? NEED_MIN + Math.min(30, 3 * Math.max(0, D.strain[i] - 10))
     : NaN;
   return `
     ${slept ? "" : `<div class="banner">No sleep recorded for <b>${t.night}</b> — showing the night of
       <b>${sn.night ?? "the last full night"}</b>.</div>`}
-    <div class="detail-dial">${ch.ring(sn.score, ok(sn.score) && sn.score >= 80 ? col("good") : col("awake"), "Sleep Score", ok(sn.score) ? `Sleep Score ${sn.score}|${hm(sn.asleep)} asleep of ${hm(sn.need)} needed` : "No sleep recorded|this night has not been scored")}</div>
-    <p class="note center">${ok(sn.asleep) ? `<b>${hm(sn.asleep)}</b> asleep of <b>${hm(sn.need)}</b> needed` : "not yet scored"}</p>
+    <div class="detail-dial">${ch.ring(sn.score, ok(sn.score) && sn.score >= 80 ? col("good") : col("awake"), "Sleep Score", ok(sn.score) ? `Sleep Score ${sn.score}|how well + how settled, × the fraction of ${hm(sn.need)} you slept` : "No sleep recorded|this night has not been scored")}</div>
+    <p class="note center">${ok(sn.asleep) ? `<b>${hm(sn.asleep)}</b> asleep of <b>${hm(sn.need)}</b> needed${ok(sn.asleep) && sn.asleep >= GOAL_MIN ? " · hit your 8h goal" : ""}` : "not yet scored"}</p>
     <div class="card"><div class="stats">
       ${stat(ok(sn.asleep) ? hm(sn.asleep) : "—", "Asleep")}${stat(ok(sn.eff) ? sn.eff + "%" : "—", "Efficiency")}
       ${stat(ok(sn.need) ? hm(sn.need) : "—", "Needed last night")}${stat(ok(sn.score) ? sn.score : "—", "Sleep Score", sn.score >= 80 ? col("good") : col("awake"))}
-    </div>${ok(tonightNeed) ? `<p class="note">Needed tonight: <b>${hm(tonightNeed)}</b> — 8h core, plus up to an hour
-      for today's strain so far, plus up to 90 minutes paying down last night's debt.</p>` : ""}</div>
+    </div>${ok(tonightNeed) ? `<p class="note">Needed tonight: <b>${hm(tonightNeed)}</b> — a flat 7h baseline${tonightNeed > NEED_MIN ? ", plus a little for today's exertion" : ""}. Your 8h goal is the stretch target; sleep debt is tracked separately below, not added here.</p>` : ""}</div>
     ${card("Hypnogram", ch.hypnogram(W, hyp))}
     ${card("Heart rate during sleep", ch.hrIntraday(W, { curve: sleepHrCurve(D, sIdx, hyp), hrmax: D.hrmax, rhr: sn.rhr }))}
     ${card(`REM — ${remDays} nights`, ch.sparkline(W, D, D.rem, col("rem"), remDays, "min"))}

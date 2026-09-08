@@ -35,6 +35,7 @@ const randn = (m, s) => {                                  // Box-Muller
 const ri = (lo, hi) => Math.round(rand(lo, hi));
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const r1 = (v) => Math.round(v * 10) / 10;
+const median = (a) => { const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 
 // ---- calendar -----------------------------------------------------------
 const N = 40;
@@ -65,14 +66,23 @@ for (let i = 0; i < N; i++) HARD[i] = rng() < 0.34;
 HARD[N - 1] = true;
 
 // ---- per-night metrics ----------------------------------------------------
-let fitness = 0.5, debt = 55;
+// Mirrors the rebuilt model in pulse/pulse/metrics.py + config.py:
+//   need   = flat 7h baseline (+ up to 30 min after a hard day)
+//   score  = quality (how well + how settled, 0-100) x fraction of need slept
+//   strain = WAKING heart-rate load only -- an easy day sits ~3-5
+//   debt   = rolling 14-night shortfall vs need, recent nights weighted more,
+//            capped at 5h (computed after the loop)
+//   target = recovery-scaled ceiling, 6 + 0.09*recovery -- a line to stay under
+const NEED_MIN = 420, GOAL_MIN = 480, DEBT_WINDOW = 14, DEBT_CAP = 300;
+let fitness = 0.5;
 const S = {
   strain: [], recovery: [], score: [], asleep: [], debt: [], rhr: [], hrv: [],
   deep: [], light: [], rem: [], awake: [], inBed: [], need: [], hrvBaseline: [],
-  steps: [], drinks: DRINK.slice(), target_lo: [], target_hi: [],
+  steps: [], drinks: DRINK.slice(), target: [],
   z: [[], [], [], [], []],
   bed: [], wake: [],                                       // minutes-of-day, for the newest night's hypnogram
 };
+const remHist = [], deepHist = [];
 
 for (let i = 0; i < N; i++) {
   const dn = DRINK[i], hard = HARD[i];
@@ -85,11 +95,10 @@ for (let i = 0; i < N; i++) {
   const hrv = clamp(baseHrv * (1 - 0.05 * dn) + randn(0, 2.2), 24, 88);
   const rhr = clamp(baseRhr + 0.85 * dn + randn(0, 0.8), 47, 72);
 
-  // Sleep. A drinking night starts later and runs shorter; REM is the stage
-  // alcohol steals, deep is front-loaded but roughly preserved.
-  const need = clamp(466 + (hard ? ri(10, 34) : ri(-8, 12)) + Math.min(34, 0.28 * debt), 450, 516);
+  // Need: flat 7h baseline, plus a little the night after a hard day.
+  const need = NEED_MIN + (hard ? ri(8, 26) : 0);
   const bed = (dn ? randn(24 * 60 + 22, 30) : randn(23 * 60 + 14, 26));   // minutes past midnight (can exceed 1440)
-  const asleepTarget = clamp((dn ? randn(420, 24) : randn(460, 28)), 355, 520);
+  const asleepTarget = clamp((dn ? randn(360, 26) : randn(452, 30)), 300, 520);
   const awake = clamp(Math.round(dn ? randn(46, 12) : randn(24, 9)), 8, 90);
   const remFrac = clamp((dn ? 0.16 - 0.008 * dn : 0.225) + randn(0, 0.015), 0.10, 0.27);
   const deepFrac = clamp((dn ? 0.215 : 0.205) + randn(0, 0.02), 0.14, 0.26);
@@ -99,23 +108,44 @@ for (let i = 0; i < N; i++) {
   const asleep = deep + light + rem;
   const inBed = asleep + awake + ri(6, 16);
   const wake = bed + inBed;
-
-  debt = clamp(0.8 * debt + 0.62 * (need - asleep), 0, 165);
-
-  // Sleep score: mostly duration-vs-need and efficiency, docked for a broken
-  // night (lots of WASO, little REM) -- the alcohol signature.
   const eff = asleep / inBed;
-  let score = 62 + 26 * clamp(asleep / need, 0, 1.05) + 14 * (eff - 0.86) / 0.12
-    - Math.max(0, (35 - rem)) * 0.25 - Math.max(0, awake - 30) * 0.35 + randn(0, 3);
-  score = clamp(Math.round(score), 48, 97);
+
+  // --- sleep score = quality x fraction-of-need ---------------------------
+  // "how well": efficiency, REM/deep vs personal baseline, wake-ups. "how
+  // settled": overnight HRV and resting HR vs their rolling base (alcohol
+  // drives both). Then multiply by how much of `need` was actually slept.
+  const remBase = remHist.length >= 7 ? median(remHist) : 100;
+  const deepBase = deepHist.length >= 7 ? median(deepHist) : 78;
+  const clip01 = (v) => clamp(v, 0, 1);
+  const wellParts = [
+    clip01((0.95 - clamp(eff, 0.75, 0.95)) / -0.2 + 1),          // efficiency
+    clip01((rem / remBase - 0.5) / 0.5),                          // REM vs base
+    clip01((deep / deepBase - 0.5) / 0.5),                        // deep vs base
+    clip01((30 - clamp(dn ? randn(9, 3) : randn(14, 4), 2, 40)) / 20), // latency
+    clip01((30 - clamp(awake, 0, 40)) / 30),                      // wake-ups
+  ];
+  const wWeights = [10, 13, 10, 8, 11];
+  const well = wellParts.reduce((a, v, k) => a + v * wWeights[k], 0)
+    / wWeights.reduce((a, b) => a + b, 0);
+  const zHrv = (hrv - baseHrv) / Math.max(baseHrv * 0.09, 2);
+  const zRhr = (rhr - baseRhr) / Math.max(baseRhr * 0.05, 1.5);
+  const settled = i < 5 ? null
+    : (21 * clip01(0.5 + zHrv / 3) + 14 * clip01(0.5 - zRhr / 3)) / 35;
+  const quality = 100 * (settled === null ? well : 0.65 * well + 0.35 * settled);
+  const durFactor = Math.min(1, asleep / need);
+  const score = clamp(Math.round(quality * durFactor), 5, 100);
+
+  remHist.push(rem); deepHist.push(deep);
+  if (remHist.length > 30) { remHist.shift(); deepHist.shift(); }
 
   // Recovery: 55% HRV / 25% resting HR / 20% sleep, each vs the rolling base.
   const hrvSub = clamp(54 + (hrv - baseHrv) / baseHrv * 155, 12, 100);
   const rhrSub = clamp(54 + (baseRhr - rhr) / baseRhr * 210, 12, 100);
   const rec = clamp(Math.round(0.55 * hrvSub + 0.25 * rhrSub + 0.20 * score), 17, 95);
 
-  // Strain: an easy day sits ~7-8.5; a session adds a log-ish 2.6-6.2.
-  const strain = r1(clamp(7.1 + randn(0, 0.45) + (hard ? rand(2.6, 6.2) : 0), 5.6, 19));
+  // Strain: WAKING load only. An easy day sits ~3-5; a session adds ~4-9.
+  // (A hungover morning no longer inflates this -- the overnight HR is out.)
+  const strain = r1(clamp(3.6 + randn(0, 0.5) + (hard ? rand(4.0, 9.0) : rand(0, 1.6)), 2.2, 19));
 
   // Time in zone. Baseline is a whole day in Z1; a session pushes minutes up.
   let z = [0, 0, 0, 0, 0];
@@ -127,13 +157,25 @@ for (let i = 0; i < N; i++) {
   const steps = ri(hard ? 8200 : 4600, hard ? 14200 : 9200);
 
   S.strain.push(strain); S.recovery.push(rec); S.score.push(score);
-  S.asleep.push(asleep); S.debt.push(Math.round(debt)); S.rhr.push(r1(rhr)); S.hrv.push(r1(hrv));
+  S.asleep.push(asleep); S.rhr.push(r1(rhr)); S.hrv.push(r1(hrv));
   S.deep.push(deep); S.light.push(light); S.rem.push(rem); S.awake.push(awake);
   S.inBed.push(inBed); S.need.push(Math.round(need)); S.hrvBaseline.push(r1(baseHrv));
   S.steps.push(steps);
-  S.target_lo.push(r1(8 + 0.1 * rec - 1.5)); S.target_hi.push(r1(8 + 0.1 * rec + 1.5));
+  S.target.push(r1(6 + 0.09 * rec));
   for (let k = 0; k < 5; k++) S.z[k].push(z[k]);
   S.bed.push(bed); S.wake.push(wake);
+}
+
+// ---- sleep debt: rolling 14-night weighted shortfall vs need, capped -----
+// Same shape as _sleep_debt() in metrics.py: a night over need pays down at
+// half rate; older shortfalls age out of the window rather than being repaid.
+for (let i = 0; i < N; i++) {
+  let acc = 0;
+  for (let k = 0; k <= i && k < DEBT_WINDOW; k++) {
+    const d = S.need[i - k] - S.asleep[i - k];
+    acc += (d > 0 ? d : 0.5 * d) * ((DEBT_WINDOW - k) / DEBT_WINDOW);
+  }
+  S.debt.push(Math.round(clamp(acc, 0, DEBT_CAP)));
 }
 
 // ---- drinks + workouts, per night ----------------------------------------
@@ -275,10 +317,36 @@ workout_nights[LAST] = workout_list;
 S.z[0][LAST] = 1440 - (22 + 6 + 5 + 1);
 S.z[1][LAST] = 22; S.z[2][LAST] = 6; S.z[3][LAST] = 5; S.z[4][LAST] = 1;
 S.steps[LAST] = 8600;
-S.strain[LAST] = 8.4;                 // a 34-minute walk barely lifts off the floor
-S.need[LAST] = 505;                   // 8h25m
-S.target_lo[LAST] = r1(8 + 0.1 * S.recovery[LAST] - 1.5);
-S.target_hi[LAST] = r1(8 + 0.1 * S.recovery[LAST] + 1.5);
+S.strain[LAST] = 5.6;                 // a 34-minute walk barely lifts off the floor
+S.need[LAST] = 420;                   // flat 7h -- no hard day yesterday
+S.target[LAST] = r1(6 + 0.09 * S.recovery[LAST]);
+// The newest night is heavy drinking (5) + short sleep: recompute its debt and
+// score off the now-final hypnogram totals so the fixture stays self-consistent.
+S.debt[LAST] = Math.round(clamp(
+  Array.from({ length: Math.min(DEBT_WINDOW, N) }, (_, k) => {
+    const d = S.need[LAST - k] - S.asleep[LAST - k];
+    return (d > 0 ? d : 0.5 * d) * ((DEBT_WINDOW - k) / DEBT_WINDOW);
+  }).reduce((a, b) => a + b, 0), 0, DEBT_CAP));
+{
+  const a = S.asleep[LAST], ib = S.inBed[LAST], eff = a / ib;
+  const remBase = median(S.rem.slice(0, LAST).slice(-30));
+  const deepBase = median(S.deep.slice(0, LAST).slice(-30));
+  const cl = (v) => clamp(v, 0, 1);
+  const wp = [
+    cl((0.95 - clamp(eff, 0.75, 0.95)) / -0.2 + 1),
+    cl((S.rem[LAST] / remBase - 0.5) / 0.5),
+    cl((S.deep[LAST] / deepBase - 0.5) / 0.5),
+    cl((30 - 9) / 20),                                   // fast onset, alcohol
+    cl((30 - clamp(S.awake[LAST], 0, 40)) / 30),
+  ];
+  const ww = [10, 13, 10, 8, 11];
+  const well = wp.reduce((s, v, k) => s + v * ww[k], 0) / ww.reduce((s, v) => s + v, 0);
+  const zHrv = (S.hrv[LAST] - S.hrvBaseline[LAST]) / Math.max(S.hrvBaseline[LAST] * 0.09, 2);
+  const zRhr = (S.rhr[LAST] - median(S.rhr.slice(0, LAST).slice(-14))) / 2.5;
+  const settled = (21 * cl(0.5 + zHrv / 3) + 14 * cl(0.5 - zRhr / 3)) / 35;
+  const quality = 100 * (0.65 * well + 0.35 * settled);
+  S.score[LAST] = clamp(Math.round(quality * Math.min(1, a / S.need[LAST])), 5, 100);
+}
 
 // ---- the newest night's civil-day heart-rate curve (00:00-24:00) ----------
 // Phases across the day. bpm is a smooth base per phase plus small noise.
@@ -328,7 +396,7 @@ const out = {
   strain: S.strain, recovery: S.recovery, score: S.score, asleep: S.asleep,
   debt: S.debt, rhr: S.rhr, hrv: S.hrv,
   deep: S.deep, light: S.light, rem: S.rem, awake: S.awake,
-  z: S.z, target_lo: S.target_lo, target_hi: S.target_hi,
+  z: S.z, target: S.target,
   steps: S.steps, drinks: S.drinks, hrmax: 192,
   curve, hypno, today,
   // per-night detail so the calendars aren't a single lit cell

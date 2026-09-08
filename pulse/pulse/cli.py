@@ -8,6 +8,7 @@
     python -m pulse build     rebuild dashboard.html from what is already cached
     python -m pulse phone     serve on your wifi and print a QR code to scan
     python -m pulse status    what is connected, what is cached
+    python -m pulse test      run the metrics formula tests (see METRICS.md)
 """
 from __future__ import annotations
 
@@ -265,6 +266,10 @@ def main(argv=None):
         from . import render
         out, D = render.build()
         print(f"ok  {out}  ({len(D['m'])} days)")
+
+    elif cmd == "test":
+        from . import metrics_test
+        sys.exit(metrics_test.run())
 
     elif cmd in ("phone", "serve"):
         if not cfg.OUT_HTML.exists():

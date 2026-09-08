@@ -26,7 +26,11 @@ python -m pulse sync 7    # pull 7 days
 
 Three headline KPIs: **Day strain** (0–21), **Recovery** (0–100),
 **Sleep score** (0–100). Then full-resolution heart rate, time-in-zone, and
-strain vs a recovery-scaled target. Sleep and Trends tabs behind that.
+strain vs a recovery-scaled ceiling. Sleep and Trends tabs behind that.
+
+How each of those is actually calculated — with the constants and the research
+behind them — is in **[METRICS.md](METRICS.md)**. `python -m pulse test` checks
+the formulas.
 
 ## Design notes
 

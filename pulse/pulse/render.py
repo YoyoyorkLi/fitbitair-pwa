@@ -125,10 +125,20 @@ def compute(con=None):
     # daily RHR yet, so zones and strain still work on day one.
     fallback_rhr = float(np.percentile(hr_all["bpm"], 5))
 
+    # Sleep windows (main sleeps AND naps) excluded from strain: overnight
+    # heart rate is recovery cost, not training load. Naps count here too --
+    # a nap is still not exertion.
+    sleep_iv = [(np.datetime64(pd.Timestamp(n["start"])),
+                 np.datetime64(pd.Timestamp(n["end"]))) for n in nights_all]
+
     rows = []
     for day, g in hr_all.groupby("day"):
         base = rhr_map.get(day, fallback_rhr)
-        s, load_, zmin = mx.day_strain(g, base, hrmax)
+        ts = g["ts"].to_numpy()
+        asleep = np.zeros(len(g), dtype=bool)
+        for s0, e0 in sleep_iv:
+            asleep |= (ts >= s0) & (ts < e0)
+        s, load_, zmin = mx.day_strain(g, base, hrmax, asleep)
         rows.append({"date": day, "strain": s, "load": load_, "rhr_used": base,
                      "n": len(g), **{f"z{i+1}": zmin[i] for i in range(5)}})
     strain_df = pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
@@ -145,7 +155,8 @@ def compute(con=None):
             hr_all = hr_all[hr_all["day"] > cut]
     strain_df = strain_df.drop(columns=["n"])
 
-    sf = mx.sleep_series(nights, dict(zip(strain_df["date"], strain_df["strain"])))
+    sf = mx.sleep_series(nights, dict(zip(strain_df["date"], strain_df["strain"])),
+                         hrv_map, rhr_map)
 
     recs = []
     for i, r in sf.iterrows():
@@ -160,9 +171,7 @@ def compute(con=None):
 
     m = strain_df.merge(sf.drop(columns=["parts"]), on="date", how="left")
     m["recovery"] = m["recovery"].fillna(50)
-    tgt = m["recovery"].apply(mx.optimal_strain)
-    m["target_lo"] = [t[0] for t in tgt]
-    m["target_hi"] = [t[1] for t in tgt]
+    m["target"] = m["recovery"].apply(mx.strain_ceiling)
     return {"m": m, "sf": sf, "nights": nights, "nights_all": nights_all,
             "hr": hr_all, "hrmax": hrmax, "rhr": rhr, "hrv": hrv, "rr": rr,
             "rhr_map": rhr_map, "hrv_map": hrv_map, "fallback_rhr": fallback_rhr}
@@ -227,8 +236,8 @@ def build(out_path=None, con=None):
 
     today = f"""
 <div class="kpi3">
-  <div class="card kpi">{ch.strain_gauge(round(last['strain'], 1), last['target_lo'],
-                                         last['target_hi'], cfg.STRAIN_SCALE)}</div>
+  <div class="card kpi">{ch.strain_gauge(round(last['strain'], 1),
+                                         last['target'], cfg.STRAIN_SCALE)}</div>
   <div class="card kpi">{ch.recovery_ring(rec, tip=rec_tip)}</div>
   <div class="card kpi">{ch.sleep_ring(score, tip=sleep_tip,
                                        sub=_hm(last_night['asleep']))}</div>
@@ -252,9 +261,11 @@ def build(out_path=None, con=None):
        f"Z3 {bounds[2]}–{bounds[3]} · Z4 {bounds[3]}–{bounds[4]} · "
        f"Z5 {bounds[4]}+ bpm. The five buckets tile the whole day, so they sum "
        f"to the time your watch was recording.")}
-{_card("Strain vs target — 21 days", ch.strain_history(m),
-       "Green band is the recovery-scaled target range. Red bars overshot it; "
-       "two or three in a row is the pattern that precedes a bad-recovery week.")}
+{_card("Strain vs ceiling — 21 days", ch.strain_history(m),
+       "The line is today's recovery-scaled ceiling — a number to stay under, "
+       "not a target to hit. Red bars went over it; two or three in a row is "
+       "the pattern that precedes a bad-recovery week. Strain is waking "
+       "heart-rate load only — sleep does not count toward it.")}
 """
 
     sleep = f"""
@@ -277,8 +288,9 @@ def build(out_path=None, con=None):
   times.</p></div>
 <div class="grid2">
   {_card(f"Sleep score {score}/100", ch.score_breakdown(parts),
-         "The six-metric breakdown Google shipped in April 2026, recomputed locally "
-         "so you can see which metric is capping the score.")}
+         f"Quality {last_night['quality']:.0f}/100 (how well you slept + how "
+         f"settled your body got), then multiplied by {last_night['dur_factor']:.2f} "
+         f"— the fraction of your {_hm(last_night['need'])} need you actually slept.")}
   {_card("Stages vs your 30-night baseline", ch.stage_bars(tonight, baseline),
          "Google dropped <code>thirtyDayAvgMinutes</code> from the v4 sleep schema, "
          "so this baseline is rebuilt from your own stored history.")}
@@ -289,8 +301,10 @@ def build(out_path=None, con=None):
        f"from the circular standard deviation of bedtime. Dashed lines are median "
        f"bed and wake times.")}
 {_card("Sleep debt — 30 days", ch.debt_area(sf),
-       f"Current debt <b>{_hm(sf.iloc[-1]['debt'])}</b>. Need = 8h plus a surcharge "
-       f"for yesterday's strain above 10, so a hard session raises tonight's bar.")}
+       f"Current debt <b>{_hm(sf.iloc[-1]['debt'])}</b> — a rolling shortfall vs "
+       f"your {_hm(cfg.SLEEP_NEED_MIN)} need over the last {cfg.SLEEP_DEBT_WINDOW} "
+       f"nights, recent nights counting most, capped at "
+       f"{cfg.SLEEP_DEBT_CAP_MIN // 60}h. Sleep at need and it falls to zero.")}
 """
 
     tr = m.tail(30)
