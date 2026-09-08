@@ -522,25 +522,48 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null,
   // stepper walks between the two halves. Anything outside the drawn window is
   // not this day's business.
   //
-  // Staggered across two rows when they crowd. Rounds land 40-50 minutes apart,
-  // which on a 320px phone spanning a whole day is ~10px -- less than one badge
-  // diameter, so a single row merged the numbered dots into an amber blob.
-  // Alternating rows doubles the effective spacing without shrinking the target.
-  const R = 6.5, ROWS = [y0 - 12, y0 - 27];
-  let lastX = -1e9, row = 0;
-  drinks
+  // A fast round -- or a burst of NFC taps -- puts several drinks minutes
+  // apart, and on a full-day chart at phone width that's a few pixels: five
+  // overlapping numbered dots become an amber smear two staggered rows can't
+  // save. So collapse any run of drinks within CLUSTER_MIN of each other into
+  // ONE pill labelled with its index range ("3-6"). Time-based, not pixel-
+  // based, so a normal 40-minute-apart round still reads as separate dots on
+  // the same full-day chart the burst would smear. Every drink's time is in
+  // the card's caption (app.js) regardless.
+  const R = 6.5, ROWS = [y0 - 12, y0 - 27], CLUSTER_MIN = 8;
+  const shown = drinks
     .map((s) => ({ at: s, v: mins(s) }))
     .filter((d) => d.v >= tLo - 3 && d.v <= tHi + 3)
     .sort((a, b2) => a.v - b2.v)
-    .forEach((d, i) => {
-      const x = X(Math.min(Math.max(d.v, tLo), tHi));
-      row = x - lastX < R * 2 + 2 ? 1 - row : 0;
-      lastX = x;
-      const cy = ROWS[row];
-      p += `<line x1="${x.toFixed(1)}" y1="${(cy + R).toFixed(1)}" x2="${x.toFixed(1)}" y2="${y1}" stroke="${col("drink")}" stroke-width="1.25" opacity=".5"/>
-        <circle cx="${x.toFixed(1)}" cy="${cy}" r="${R}" fill="${col("drink")}" data-tip="${esc(`Drink ${i + 1}|${t12(d.at)}`)}"/>
-        ${txt(x, cy + 3.2, i + 1, { size: 8.5, anchor: "middle", fill: "bg", weight: 700 })}`;
-    });
+    .map((d, i) => ({ ...d, n: i + 1, x: X(Math.min(Math.max(d.v, tLo), tHi)) }));
+
+  const groups = [];
+  for (const d of shown) {
+    const g = groups[groups.length - 1];
+    if (g && d.v - g.items[g.items.length - 1].v < CLUSTER_MIN) g.items.push(d);
+    else groups.push({ items: [d] });
+  }
+
+  let lastX = -1e9, row = 0;
+  for (const g of groups) {
+    const it = g.items, a = it[0], z = it[it.length - 1];
+    const cx = (a.x + z.x) / 2;
+    row = cx - lastX < R * 2 + 4 ? 1 - row : 0;
+    lastX = cx;
+    const cy = ROWS[row], solo = it.length === 1;
+    const label = solo ? `${a.n}` : `${a.n}–${z.n}`;
+    const tip = solo
+      ? `Drink ${a.n}|${t12(a.at)}`
+      : `${it.length} drinks (${a.n}–${z.n})|${it.map((d) => t12(d.at)).join(" · ")}`;
+    p += `<line x1="${cx.toFixed(1)}" y1="${(cy + R).toFixed(1)}" x2="${cx.toFixed(1)}" y2="${y1}" stroke="${col("drink")}" stroke-width="1.25" opacity=".5"/>`;
+    if (solo) {
+      p += `<circle cx="${cx.toFixed(1)}" cy="${cy}" r="${R}" fill="${col("drink")}" data-tip="${esc(tip)}"/>`;
+    } else {
+      const w = Math.min(Math.max(z.x - a.x + R * 2, R * 2 + 6), x1 - x0);
+      p += `<rect x="${(cx - w / 2).toFixed(1)}" y="${(cy - R).toFixed(1)}" width="${w.toFixed(1)}" height="${(R * 2).toFixed(1)}" rx="${R.toFixed(1)}" fill="${col("drink")}" data-tip="${esc(tip)}"/>`;
+    }
+    p += txt(cx, cy + 3.2, label, { size: solo ? 8.5 : 8, anchor: "middle", fill: "bg", weight: 700 });
+  }
 
   // Workout badges: a numbered dot in the top margin ABOVE the drink markers,
   // each at its band's TRUE midpoint x so the stem drops straight onto the

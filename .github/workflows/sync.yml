@@ -24,8 +24,13 @@ name: sync
 # pulse/.
 on:
   schedule:
-    - cron: "7 * * * *"     # :07 past the hour, not :00 -- GitHub queues every
-                             # repo's on-the-hour jobs together and delays them
+    # Four odd-minute slots an hour. GitHub heavily deprioritises scheduled
+    # runs on a low-traffic repo -- with a single hourly cron the real gap was
+    # 3-6 hours -- so ask often and at off-peak minutes and hope one lands per
+    # hour. A run is ~25s and this repo is public (unlimited Actions minutes),
+    # so the extra attempts cost nothing. For a hard guarantee, drive it from
+    # an external pinger against /api/sync instead (see api/sync.js).
+    - cron: "3,18,33,48 * * * *"
   workflow_dispatch:
     inputs:
       full:

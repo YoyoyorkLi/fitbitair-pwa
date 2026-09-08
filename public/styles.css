@@ -219,16 +219,15 @@ a{color:var(--accent)}
   width:34px;height:34px;font-size:17px;line-height:1;flex:none;
   -webkit-tap-highlight-color:transparent}
 .drdel:active{color:var(--warn);border-color:var(--warn)}
-/* min-width:0 on the flex item is the fix for the overlap: a native
-   <input type="time"> reports a wide min-content size, and without this the
-   field refused to shrink below it — so the field and the Add button both sat
-   at their intrinsic widths, overflowed the row, and the button rode up over
-   the input's right edge. */
-.drinkadd{display:flex;gap:10px;align-items:flex-end}
-.drinkadd .field{flex:1 1 auto;min-width:0;margin:0}
+/* Stacked, not a row. Side-by-side kept overlapping on iOS however the flex
+   was tuned -- a native <input type="time"> paints its own wide control and
+   does not honour the box it's given. Time input on top, Add below it; nothing
+   to collide. */
+.drinkadd{display:flex;flex-direction:column;gap:12px;align-items:flex-start}
+.drinkadd .field{margin:0;width:100%}
 .drinkadd .field span{font-size:12px}
-.drinkadd input{min-width:0}
-.drinkadd button.primary{flex:0 0 auto;width:auto;padding:14px 20px}
+.drinkadd input{width:100%}
+.drinkadd button.primary{width:auto;padding:13px 30px}
 
 /* #workout-day's per-workout cards: collapsed to time/duration/calories,
    expanding on tap to the heart-rate chart and zone breakdown. The summary
