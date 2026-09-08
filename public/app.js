@@ -537,19 +537,35 @@ async function boot() {
 
 // Fill in the per-night arrays the day stepper needs, for any source that does
 // not already carry them. loadLive() does; demo.json does not -- the fixture
-// holds one `curve` and one `hypno`, for its newest night only. Rather than
-// invent 39 more, the older nights get an empty curve and the chart says so.
-// Everything else in the fixture is already a full 40-night array.
+// holds one `curve` and one `hypno`, for its newest night only (39 more would
+// bloat the file 30x), so the older nights get an empty curve and the chart
+// says so. The drink and workout detail, though, IS carried per night in the
+// fixture's `*_nights` arrays so the Drinks and Workouts calendars aren't a
+// single lit cell -- older `pulse demo` fixtures without them still work via
+// the newest-night-only fallback.
 function normalize(D) {
   const n = D.dates.length, last = n - 1;
   const only = (v) => Array.from({ length: n }, (_, i) => (i === last ? v : null));
+  const rows = (list) => (list || []).map((r) => ({ ...r, logged_at: new Date(r.logged_at) }));
+
   D.curves ??= only(D.curve || []).map((v) => v || []);
   D.hypnos ??= only(D.hypno || null);
-  D.drinkTimes ??= only(D.drink_times || []).map((v) => v || []);
-  D.drinkRows ??= only((D.drink_rows || []).map((r) => ({ ...r, logged_at: new Date(r.logged_at) }))).map((v) => v || []);
-  D.firstDrink ??= only(D.first_drink ? new Date(D.first_drink) : null);
-  D.lastDrink ??= only(D.last_drink ? new Date(D.last_drink) : null);
-  D.workouts ??= only(D.workout_list || []).map((v) => v || []);
+  D.drinkTimes ??= D.drink_times_nights
+    ? D.drink_times_nights.map((v) => v || [])
+    : only(D.drink_times || []).map((v) => v || []);
+  D.drinkRows ??= D.drink_rows_nights
+    ? D.drink_rows_nights.map(rows)
+    : only(rows(D.drink_rows)).map((v) => v || []);
+  D.firstDrink ??= D.drink_rows_nights
+    ? D.drinkRows.map((d) => (d.length ? d[0].logged_at : null))
+    : only(D.first_drink ? new Date(D.first_drink) : null);
+  D.lastDrink ??= D.drink_rows_nights
+    ? D.drinkRows.map((d) => (d.length ? d[d.length - 1].logged_at : null))
+    : only(D.last_drink ? new Date(D.last_drink) : null);
+  D.workouts ??= D.workout_nights
+    ? D.workout_nights.map((v) => v || [])
+    : only(D.workout_list || []).map((v) => v || []);
+
   for (const k of ["inBed", "need", "hrvBaseline"]) D[k] ??= [];
   return trimInProgressNight(D);
 }
