@@ -167,7 +167,8 @@ def _num(body, *preferred):
         return float(nums[0][1])
     for k, v in nums:                       # deterministic tie-break
         if any(w in k.lower() for w in ("value", "rate", "rmssd", "percent",
-                                        "bpm", "beats", "avg", "mean")):
+                                        "bpm", "beats", "avg", "mean",
+                                        "celsius", "temp", "delta")):
             return float(v)
     return float(nums[0][1]) if nums else float("nan")
 

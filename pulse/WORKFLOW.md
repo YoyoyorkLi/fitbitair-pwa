@@ -356,9 +356,16 @@ probing each data type with a short window ...
 | `EMPTY` | Not an error. Your Air has not recorded that metric in the window — normal for HRV or SpO2 if you have not worn it overnight yet. |
 | `FAIL` | Real problem. The message says which. See troubleshooting. |
 
-You need **at minimum** `heart-rate` and `sleep`. The four daily metrics are
+You need **at minimum** `heart-rate` and `sleep`. The daily metrics are
 enrichment; the dashboard degrades gracefully without them (recovery falls back
 to a neutral baseline, and resting HR is estimated from your sleeping minimum).
+
+**`daily-sleep-temperature-derivations`** (overnight skin-temperature variation
+— the Fitbit app's "Skin Temperature" screen) was added on spec. `doctor` will
+show whether your account returns it and the real field name; if it comes back
+`FAIL` with a `400`, the type name or filter path is wrong and it can be
+removed from `config.DATA_TYPES` — a failing sync of one optional type no
+longer aborts the whole run, it just prints `skipped`.
 
 **If a field name differs from what Pulse expects, it still works.** The parser
 falls back to the single numeric field in the payload. The v4 schema is pre-GA

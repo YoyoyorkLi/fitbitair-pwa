@@ -136,6 +136,14 @@ DATA_TYPES = {
     "daily-heart-rate-variability": ("daily",    "daily_heart_rate_variability.date"),
     "daily-respiratory-rate":       ("daily",    "daily_respiratory_rate.date"),
     "daily-oxygen-saturation":      ("daily",    "daily_oxygen_saturation.date"),
+    # Overnight skin-temperature variation from baseline (what the Fitbit app's
+    # "Skin Temperature" screen shows) -- a Daily type, `list`-queryable, same
+    # class as the four above. It is the temperature signal illness-detection
+    # research leans on (Oura TemPredict). Whether YOUR account returns it, and
+    # the real response field name, are a `pulse doctor` away -- the wire name
+    # below is a documented guess and _num()'s "temp"/"celsius" fallback (see
+    # metrics.py) covers it until doctor confirms.
+    "daily-sleep-temperature-derivations": ("daily", "daily_sleep_temperature_derivations.date"),
 }
 
 # Documented field names per Daily type. Treated as a *hint*: the parser falls

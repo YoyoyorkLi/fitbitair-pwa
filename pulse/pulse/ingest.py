@@ -198,14 +198,29 @@ def sync(days=None, con=None, verbose=False, progress=None):
             tasks.append((dt, w0, w1))
 
     got = {dt: [] for dt in cfg.DATA_TYPES}
+    errs = {}
     done = 0
     with ThreadPoolExecutor(max_workers=min(cfg.SYNC_WORKERS, len(tasks) or 1)) as ex:
         futs = {ex.submit(fetch, dt, w0, w1, token): dt for dt, w0, w1 in tasks}
         for fut in as_completed(futs):
-            got[futs[fut]] += fut.result()      # re-raises fetch()'s RuntimeError
+            dt = futs[fut]
+            try:
+                got[dt] += fut.result()
+            except RuntimeError as e:
+                # One data type the account doesn't have, or a new type the API
+                # rejects (400), must not abort a sync that got everything else.
+                # But if EVERY task failed -- a dead token, an outage -- that is
+                # a real failure and is raised below.
+                errs.setdefault(dt, str(e).split("\n")[0])
             done += 1
             if progress:
                 progress("fetch", done, len(tasks))
+
+    if errs and len(errs) == len(cfg.DATA_TYPES):
+        raise RuntimeError("every data type failed: " + next(iter(errs.values())))
+    for dt, msg in errs.items():
+        if verbose:
+            print(f"  {dt:32s} skipped: {msg}")
 
     counts = {}
     for dt in cfg.DATA_TYPES:
