@@ -2,12 +2,15 @@
 # Re-authorize Google Health and hand you the fresh refresh token, ready to
 # paste into the GitHub secret.
 #
-# Why this exists: the OAuth app is staying in Testing mode (not chasing
-# Google's full brand-verification review, which is built for public
-# products with external users, not a single-person tool on a free vercel.app
-# subdomain that Google's own domain rules only half-accept). Testing mode's
-# real cost is a refresh token that dies 7 days after consent -- this makes
-# renewing it a 30-second, once-a-week habit instead of a research project.
+# Why this exists: mints a fresh refresh token for the GH_REFRESH_TOKEN repo
+# secret. The OAuth app is now "In production" (unverified) -- see
+# WORKFLOW.md 2b -- so a token minted here has no expiry clock. This is a
+# one-time step now; re-run it only if the sync starts failing auth again
+# (access revoked, a Workspace session policy, a password change).
+#
+# History: while the app was in Testing (through early 2026-09) that consent,
+# refresh token included, died 7 days flat after each login, and this was a
+# weekly chore.
 #
 # Usage:
 #     ./refresh_login.sh

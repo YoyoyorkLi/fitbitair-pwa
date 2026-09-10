@@ -3,7 +3,7 @@
 Personal health dashboard on the Google Health API v4. Replaces the Google
 Health app's charts with one self-contained HTML file you open on your phone.
 
-Free to run. No published app, no hosting, no billing account.
+Free to run. No paid hosting, no billing account.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate

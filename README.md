@@ -42,6 +42,10 @@ secrets (**Settings → Secrets and variables → Actions**):
 | `PULSE_TZ` | `America/Chicago` |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | `.env.local` |
 
+`GH_REFRESH_TOKEN` is minted by [`pulse/refresh_login.sh`](pulse/refresh_login.sh).
+The OAuth app is in production, so it doesn't expire on a schedule — re-mint it
+only if a run fails auth (see [`pulse/WORKFLOW.md`](pulse/WORKFLOW.md) §2b/2d).
+
 Each hourly run pulls ~5 days of heart-rate (a finished day never changes) plus
 a ~35-day window of the cheap daily metrics for baselines, all requests
 concurrent, and upserts only the ~5 recent nights those cover — older Supabase

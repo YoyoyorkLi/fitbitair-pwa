@@ -8,6 +8,9 @@ Publishing status decides how often you repeat this:
                after consent.
   Production - still unverified, still shows the "Google hasn't verified this
                app" warning, still capped at 100 users, but no 7-day clock.
+
+This app is in Production (confirmed 2026-09-10), so a token minted from here
+lasts until it is explicitly revoked. WORKFLOW.md 2b has the full story.
 """
 from __future__ import annotations
 
@@ -167,10 +170,13 @@ def access_token():
         if "invalid_grant" in str(e):
             raise SystemExit(
                 "Your refresh token has expired or was revoked.\n\n"
-                "The usual cause is the OAuth app still being in 'Testing' status,\n"
-                "where consent expires after 7 days. Set it to 'In production' in\n"
-                "the Google Auth Platform console (stays unverified, still free),\n"
-                "then run:  python -m pulse login") from None
+                "The app is in Production, so the 7-day Testing clock no longer\n"
+                "applies. Remaining causes: access revoked at\n"
+                "myaccount.google.com/permissions, a Workspace session-control\n"
+                "policy on the account, or a Google password change.\n\n"
+                "Re-consent with:  ./refresh_login.sh\n"
+                "(or  python -m pulse login  then update the GH_REFRESH_TOKEN secret)"
+            ) from None
         raise
 
     tok.update(fresh)

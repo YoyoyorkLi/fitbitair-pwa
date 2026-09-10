@@ -112,7 +112,7 @@ required. `Ctrl-C` to stop.
 
 ## Step 2 — Google Cloud console
 
-You have already created the OAuth client. Three things left to confirm.
+You have already created the OAuth client. A few things to confirm.
 
 ### 2a. API enabled
 
@@ -122,20 +122,33 @@ You have already created the OAuth client. Three things left to confirm.
 Skipping this gives you a successful login followed by a baffling 403 on every
 data call.
 
-### 2b. Publish the app — tried, and it doesn't work on a free domain
+### 2b. Publishing status — now "In production", unverified
 
-**This whole section turned out wrong.** Publishing is *not* a free status
-flag for this app, and after actually going through it, staying in Testing is
-the real, permanent answer here — not a workaround, the destination. Left the
-full story below because the reasoning is worth having next time this comes
-up, rather than relearning it.
+**The app is in Production** — confirmed 2026-09-10 at Google Auth Platform
+→ Audience → Publishing status. That status flip is free and instant, and it
+is all that is needed: an unverified Production app works indefinitely for a
+single user. Do **not** click "Back to testing".
 
-**What "just publish" assumed, and where that breaks.** For an app requesting
-ordinary scopes, **Google Auth Platform → Audience → Publish app** genuinely
-is a free status flip. But `googlehealth.*` scopes are classified *sensitive*
-(real health data), and for sensitive scopes, publishing routes you through
-an actual **brand verification review**, not a toggle. That review flagged
-four things, in order:
+**Production and verified are two separate things.** "Publish app" moves the
+status to Production straight away. Verification — the brand / security
+review — is a separate gate, and an unverified Production app:
+
+- shows the "Google hasn't verified this app" screen — fine, it is only you
+  (Advanced → Continue, once per login)
+- is capped at 100 users for unapproved sensitive scopes — fine, you are 1
+- issues refresh tokens with **no 7-day expiry**. That clock is *Testing*
+  only. This is the whole reason to be in Production.
+
+The one open-ended risk: Google could someday require verification for these
+restricted scopes and restrict the app until it is done. No timer, and
+historically loose for tiny single-user apps — but if it happens, you are
+back to the domain problem below.
+
+**Why verification itself can't pass here** (kept because it is worth having
+next time this comes up). `googlehealth.*` scopes are classified
+*sensitive / restricted* (real health data), so going for verification
+routes you through an actual **brand-verification review**. That review
+flagged four things, in order:
 
 1. App name **"Fitbit Air"** — that's Google's own product name; naming your
    app after it reads as brand impersonation.
@@ -189,18 +202,17 @@ not pass without an independently-owned domain.**
   actively detects and blocks automated login — the likely outcome is the
   account getting flagged, not a working pipeline.
 - **Dropping to non-sensitive scopes** to dodge the review — would lose most
-  of what the app actually does (steps, sleep, HRV). Removes the reason the
-  project exists to dodge a 30-second weekly task.
+  of what the app actually does (steps, sleep, HRV).
 
-**The two paths that do work, if this ever needs revisiting:**
+**If verification is ever actually needed** (Google forces it — see the risk
+note above), the two paths that would pass:
 - **A real, independently-registered domain** (~$10–13/yr at cost, e.g.
   Cloudflare Registrar or Porkbun — avoid teaser-priced TLDs that jump in
-  price after year one) pointed at the deployment. Removes the 7-day cycle
-  permanently once verified.
+  price after year one) pointed at the deployment.
 - **GitHub Student Developer Pack**, if eligible — includes a free Namecheap
   domain for a year, same effect at zero cost for that year.
 
-**What's actually running instead — see 2d below.**
+Until then, unverified Production covers it — see 2d for the refresh token.
 
 Either way, Branding needs a home page and privacy policy URL before
 `Publish app` is even clickable — the fields are still worth having filled in
@@ -213,12 +225,10 @@ correctly regardless of which path you take:
 
 (`public/privacy.html` in this repo's root, not `pulse/` — exists for exactly this.)
 
-### 2d. Living with Testing mode — `refresh_login.sh`
+### 2d. Minting the refresh token — `refresh_login.sh`
 
-Testing-mode consent, **including the refresh token**, expires 7 days after
-the last full login — not 7 days of inactivity, 7 days flat, no matter how
-often the access token silently refreshes in between. That's the entire
-remaining cost of not pursuing 2b further:
+The CI (`sync.yml`) authenticates with a refresh token in the
+`GH_REFRESH_TOKEN` repo secret. To mint or replace it:
 
 ```bash
 ./refresh_login.sh
@@ -230,13 +240,21 @@ either updates the `GH_REFRESH_TOKEN` GitHub secret directly (if `gh` is
 installed and authed) or prints the new token ready to paste in by hand at
 **Settings → Secrets and variables → Actions** on the repo.
 
-Run it roughly once a week, comfortably before the 7-day mark. If it's ever
-forgotten and the sync starts failing, the PWA's own sync-staleness banner is
-the safety net that surfaces it.
+Now that the app is in Production (2b), a minted token has **no 7-day
+expiry** — this is a one-time step, not a weekly habit. Re-run it only if the
+sync starts failing auth for another reason: access revoked at
+myaccount.google.com/permissions, a Workspace session-control policy on the
+account, a Google password change, or >100 live refresh tokens for the
+client. The PWA's own sync-staleness banner surfaces any of these.
 
-### 2c. Test user + scopes
+Historical note: while the app was in Testing (through early 2026-09) this
+consent — refresh token included — expired 7 days flat after each login
+regardless of activity, and this script was a weekly chore.
 
-Same page → **Test users** → add the Google account paired with your Air.
+### 2c. Scopes
+
+**Test users** no longer matter in Production — that list only gates Testing
+mode. Any account can consent now (through the unverified-app screen).
 
 **Data access** should list exactly three, all flagged *Restricted*:
 
@@ -449,8 +467,10 @@ It is one ~80 kB file. Genuinely fine for occasional use.
 **What's actually running: GitHub Actions**, not this section. See
 [`../.github/workflows/sync.yml`](../.github/workflows/sync.yml) — hourly,
 `pulse push sync`, six repo secrets (documented in the repo root
-[`README.md`](../README.md)). Keeping it alive is exactly [2d above](#2d-living-with-testing-mode--refresh_loginsh):
-`refresh_login.sh` weekly, nothing else.
+[`README.md`](../README.md)). With the app in Production (2b) the refresh
+token no longer expires on a schedule, so there is nothing to keep alive —
+re-run [`refresh_login.sh`](#2d-minting-the-refresh-token--refresh_loginsh)
+only if auth actually breaks.
 
 A run used to take ~4 min — 30 one-day heart-rate requests in series. Now the
 catch-up sync pulls only **~5 days of heart-rate** (a finished day never
@@ -587,8 +607,8 @@ night.
 |---|---|---|
 | `403` with `UberMint` / `GaiaMint` | Legacy Fitbit account consented instead of a Google Account | Sign out of the Google Health app, sign back in via **"Continue with Google"** |
 | `403` otherwise | API not enabled, or scopes not consented | Enable **Google Health API**, re-run `login` |
-| `invalid_grant` after ~a week | App still in **Testing** | Publish to **In production** (2b), then `login` |
-| `access_denied` on the consent screen | Account not a test user | Add it under **Audience → Test users** |
+| `invalid_grant` on token refresh | Access revoked, a Workspace session policy on the account, or a password change (the 7-day Testing clock no longer applies — 2b) | `./refresh_login.sh` |
+| `access_denied` on the consent screen | Consent was cancelled, or the app got restricted pending verification | Retry `login`; if it persists, check **Verification Center** in the console |
 | `redirect_uri_mismatch` | Web client without loopback URIs | Recreate as **Desktop app**, or register both `localhost` and `127.0.0.1` |
 | `Cannot listen on port 8765` | Port in use | Add `PULSE_REDIRECT_URI=http://localhost:8799/callback` to `.env` |
 | `No refresh token returned` | Google withholds on repeat consent | Revoke at **myaccount.google.com/permissions**, log in again |
