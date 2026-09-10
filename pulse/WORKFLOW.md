@@ -40,22 +40,20 @@ one-off `GH_CLIENT_ID=... python -m pulse ...` works as you would expect.
 Fitbit Air  ──Bluetooth──▶  Google Health app  ──▶  Google's servers
    (records                    (on your phone)          (stores history)
     every 2 s)                                                │
-                                                     once a day, ~14 requests
+                                                     hourly, ~15 requests (GitHub Actions)
                                                               ▼
-                                              ┌───────────────────────────┐
-                                              │  Your Mac                 │
-                                              │  pulse.db   (raw JSON)    │
-                                              │  dashboard.html  (~80 kB) │
-                                              └─────────────┬─────────────┘
-                                                            │
-                                              QR / iCloud / AirDrop
-                                                            ▼
-                                                       Your phone
+                                          pulse.db (raw JSON)  ─push.py─▶  Supabase (one row / night)
+                                                                                │
+                                                                    anon key, RLS, read-only
+                                                                                ▼
+                                                                    the PWA  (../public/)
 ```
 
-Your Mac is **not** a server polling Google. It downloads stored history once a
-day in about ten seconds. The 5-second resolution lives in the *stored data*,
-not in how often you ask for it.
+Nothing polls Google continuously. The hourly job downloads a few days of
+stored history, computes every night, and upserts to Supabase; the PWA reads
+that. The 2-second resolution lives in the *stored data*, not in how often you
+ask for it. There is no local dashboard — `render.py` keeps only `compute()`,
+the numeric pipeline `push.py` calls.
 
 ---
 
@@ -65,48 +63,32 @@ Do this first. It proves the software works before credentials can confuse
 anything.
 
 ```bash
-cd ~/Downloads
-unzip pulse-source.zip
 cd pulse
-
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
 python -m pulse demo
-open dashboard.html
 ```
 
 **Expected output**
 
 ```
 generating 30 synthetic days in the v4 wire format ...
-ok  /Users/you/Downloads/pulse/dashboard.html
-    30 days, 90,420 heart-rate samples
-
-next:  python -m pulse phone
+ok  30 nights, 90,420 heart-rate samples
+    newest: strain 12.3  recovery 61  sleep 78
 ```
 
-**What you should see:** a dark dashboard. Top of the first tab is a row of
-three headline KPIs — **Day strain**, **Recovery**, **Sleep score** — then a
-supporting stat row, the full-resolution heart-rate chart, time-in-zone, and a
-21-day strain-vs-target chart. Two more tabs: Sleep and Trends. Tap or hover any
-chart element for a tooltip.
+`demo` synthesises data shaped byte-for-byte like the real API returns, then
+runs the whole pipeline on it — parsing, metrics, the Supabase row shaping —
+without touching an account. If it prints numbers, the code is fine; anything
+that breaks later is a credentials or account problem, far easier to debug.
 
-The data is synthetic but shaped byte-for-byte like the real API returns, so
-every line of parsing, maths and rendering is exercised.
+`python -m pulse test` additionally pins the formulas (see METRICS.md).
 
-> If this step works, the code is fine. Anything that breaks later is a
-> credentials or account problem, which is far easier to debug.
-
-**Then check the phone path:**
-
-```bash
-python -m pulse phone
-```
-
-A QR code prints in the terminal. Point your iPhone camera at it. Same wifi
-required. `Ctrl-C` to stop.
+The front end is the PWA in `../public/` — run it with `npx vercel dev` from
+the repo root, or open the deployed URL. Its demo mode (`?demo=1`) reads
+`../public/demo.json`, rebuilt by `../gen-demo.mjs`.
 
 ---
 
@@ -375,7 +357,7 @@ probing each data type with a short window ...
 | `FAIL` | Real problem. The message says which. See troubleshooting. |
 
 You need **at minimum** `heart-rate` and `sleep`. The daily metrics are
-enrichment; the dashboard degrades gracefully without them (recovery falls back
+enrichment; the pipeline degrades gracefully without them (recovery falls back
 to a neutral baseline, and resting HR is estimated from your sleeping minimum).
 
 **`daily-sleep-temperature-derivations`** (overnight skin-temperature variation
@@ -413,12 +395,17 @@ pulling 7 days from the Google Health API ...
   daily-heart-rate-variability            8 points
   daily-respiratory-rate                  8 points
   daily-oxygen-saturation                 8 points
-ok  dashboard.html  (7 days)
+  daily-sleep-temperature-derivations     8 points
+ok  cached. Next:  python -m pulse push
 ```
 
-Heart rate dominates because 5-second sampling is roughly 17,000 points a day.
+Heart rate dominates because 2-second sampling is roughly 17,000 points a day.
 Counts are one higher than the days you asked for: Pulse fetches an extra day so
 the oldest *local* day is complete rather than truncated at the UTC boundary.
+
+Then `python -m pulse push` computes every night and upserts to Supabase. A
+first run also needs the schema (`sql/schema.sql`) and, if you set up before
+Recovery Load, the one-off `sql/migrations/001_recovery_load.sql`.
 
 Then backfill:
 
@@ -436,29 +423,16 @@ python -m pulse status
 
 ## Step 7 — Onto the phone
 
-### Option A — QR over wifi (daily use)
+There is no local dashboard to move around. The front end is the **PWA**
+deployed from this repo's root (Vercel), reading from Supabase.
 
-```bash
-python -m pulse phone
-```
-
-Point your camera at the code. The server serves **only** `dashboard.html`.
-`pulse.db`, `.env` and `.token.json` all return 404, and there is no directory
-listing or path traversal.
-
-### Option B — iCloud Drive (offline, Mac can be asleep)
-
-```bash
-cp dashboard.html ~/Library/Mobile\ Documents/com~apple~CloudDocs/
-```
-
-Open the **Files** app, tap it. Renders fully offline; everything is inline in
-that one file. Open in Safari → **Share → Add to Home Screen** for a full-screen
-icon with no browser chrome.
-
-### Option C — AirDrop
-
-It is one ~80 kB file. Genuinely fine for occasional use.
+- Open the deployed URL in Safari → **Share → Add to Home Screen** for a
+  full-screen icon.
+- Sign in with the email + password you created in Supabase
+  (**Authentication → Users**). Password, not a magic link — a magic link
+  authenticates Safari, which is a different storage partition from the
+  home-screen app.
+- Without a sign-in it shows the demo (`?demo=1`, synthetic data).
 
 ---
 
@@ -503,7 +477,7 @@ cat > ~/Library/LaunchAgents/local.pulse.plist <<EOF
   <key>ProgramArguments</key>
   <array>
     <string>$PWD/.venv/bin/python</string>
-    <string>-m</string><string>pulse</string><string>sync</string>
+    <string>-m</string><string>pulse</string><string>push</string><string>sync</string>
   </array>
   <key>WorkingDirectory</key><string>$PWD</string>
   <key>StartCalendarInterval</key>
@@ -531,14 +505,13 @@ Check it ran: `tail sync.log`.
 
 | Command | Network? | Writes | Purpose |
 |---|---|---|---|
-| `demo [days]` | no | `pulse-demo.db`, `dashboard.html` | Synthetic data. Never touches your real cache. |
+| `demo [days]` | no | `pulse-demo.db` | Synthetic data through the whole pipeline — a fast check. Never touches your real cache. |
 | `setup [json]` | no | `.env` | Store client ID/secret and timezone. |
 | `login` | yes | `.token.json` | One-time browser sign-in. |
 | `doctor [days]` | yes | nothing | Probe types, show real field names. |
-| `sync [days]` | yes | `pulse.db`, `dashboard.html` | Pull. No number = catch up. Requests run concurrently. |
-| `push [days\|sync]` | yes | Supabase (`pulse.db` if a number/`sync`) | Upsert nights. `sync` = catch-up pull + push, no HTML build (the CI path). A number pulls that many days first. |
-| `build` | no | `dashboard.html` | Re-render from cache. |
-| `phone [port]` | LAN | nothing | Serve one file, print QR. |
+| `sync [days]` | yes | `pulse.db` | Pull. No number = catch up. Requests run concurrently. |
+| `push [days\|sync]` | yes | Supabase (`pulse.db` if a number/`sync`) | Compute every night and upsert. `sync` = catch-up pull + push (the CI path). A number pulls that many days first. |
+| `test` | no | nothing | Run the metrics formula tests (METRICS.md). |
 | `status` | no | nothing | Credentials, connection, cache. |
 
 Bare `python -m pulse` prints help and touches nothing.
@@ -578,11 +551,12 @@ The card shows a "day in progress" note. Strain accumulates.
 
 **Data is minutes to tens of minutes old.** The watch syncs to your phone about
 every 15 minutes in the background, or immediately when you open the Google
-Health app. That Bluetooth hop, not this dashboard, sets freshness. The header
-shows *"last reading 14:32 · 6 min ago"* and turns amber past 45 minutes.
+Health app; on top of that the hourly push, and Google's own processing lag.
+The PWA header shows how stale the last sync is and turns amber past ~100 min.
 
-**Naps are excluded.** Sessions under 3 hours are filtered so a 25-minute nap
-cannot be rendered as "last night".
+**Naps don't become "last night".** A session under 3 hours is never scored as
+the main sleep — but its minutes still credit sleep debt and recovery, keyed
+to the day you woke. The Air only detects a nap after ~45 min of stillness.
 
 **Recovery needs history.** Z-scores need at least five prior days. Before that
 it sits near neutral by design, not by accident.
@@ -617,21 +591,24 @@ night.
 | `No usable sleep sessions` | Only CLASSIC sleep synced (no stages) | Wear it overnight and sync again |
 | `400` mentioning query range | Window too large | Already chunked (1 day HR, 30 others). Report it if you see this. |
 | `429` | Rate limited | Wait a minute. Limit is 300 req/min; a sync uses ~14. |
-| Evening workouts on the wrong day | Timezone unset | `PULSE_TZ` in `.env`, or re-run `setup` |
-| Phone cannot reach the URL | Different network or firewall | Same wifi; allow incoming connections for Python if macOS prompts |
+| Evening workouts on the wrong day | Timezone unset | `PULSE_TZ` in `.env`, or `PULSE_TZ` repo secret for CI |
+| PWA shows the demo when you expect your data | Not signed in, or the sync hasn't populated anything | Sign in (Supabase → Authentication → Users); check `sync_state` |
+| Push `400` naming a column | Schema out of date | Run `sql/schema.sql` on a fresh project, or the migration in `sql/migrations/` |
 
 ---
 
 ## Privacy
 
-Google's servers → your Mac → a file. No third party, no analytics, no
-telemetry, no server component. `pulse.db` and `dashboard.html` never leave your
-machine unless you copy them.
+Google's servers → your Mac (`pulse.db`, raw JSON) → Supabase (one computed
+row per night). No analytics, no telemetry, no third party beyond Supabase and
+the Vercel functions in `../api/`.
 
 `.env` and `.token.json` hold your credentials and refresh token, both written
-`0600` and both in `.gitignore`. Revoke access any time at
+`0600` and both in `.gitignore`. Revoke Google access at
 **myaccount.google.com/permissions**.
 
-`python -m pulse phone` serves exactly one file. Verified against path
-traversal, URL-encoded traversal, dot-segment paths and directory listing:
-everything except `dashboard.html` returns 404.
+The PWA reads Supabase on the **anon key** — public by design, fenced by RLS so
+`authenticated` (you, and only you — sign-ups are off) is the only role that
+can read anything. The tap endpoint (`../api/tap.js`) uses the `service_role`
+key server-side and a separate tag token that can only *append* a drink. See
+`sql/schema.sql`.

@@ -1,91 +1,22 @@
 """Command line entry point.
 
-    python -m pulse demo      synthetic 30 days -> dashboard.html, no account needed
+    python -m pulse demo      synthetic data, no account -- checks the pipeline
     python -m pulse setup     write .env with your Google client ID/secret
     python -m pulse login     one-time Google sign-in, opens your browser
     python -m pulse doctor    probe every data type, show real field names
-    python -m pulse sync      pull real data into pulse.db, then rebuild
-    python -m pulse build     rebuild dashboard.html from what is already cached
-    python -m pulse phone     serve on your wifi and print a QR code to scan
+    python -m pulse sync      pull real data into pulse.db
+    python -m pulse push      compute every night and upsert to Supabase
     python -m pulse status    what is connected, what is cached
     python -m pulse test      run the metrics formula tests (see METRICS.md)
+
+The only front end is the PWA (../public/). There is no local dashboard.
 """
 from __future__ import annotations
 
 import os
-import socket
 import sys
-from datetime import datetime
 
 from . import config as cfg
-
-
-def _lan_ip():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(("8.8.8.8", 80))
-        return s.getsockname()[0]
-    except Exception:
-        return "127.0.0.1"
-    finally:
-        s.close()
-
-
-def _serve(port):
-    import http.server
-    import socketserver
-
-    from . import qr
-
-    ip = _lan_ip()
-    url = f"http://{ip}:{port}/dashboard.html"
-
-    class OnlyDashboard(http.server.BaseHTTPRequestHandler):
-        """Serves exactly one file.
-
-        A directory-serving handler would expose the whole folder on your wifi,
-        including .token.json (your refresh token) and pulse.db (your full
-        health history). This one cannot: there is no path traversal to find.
-        """
-
-        def do_GET(self):
-            if self.path.split("?")[0] not in ("/", "/dashboard.html"):
-                self.send_error(404)
-                return
-            try:
-                body = cfg.OUT_HTML.read_bytes()
-            except FileNotFoundError:
-                self.send_error(404)
-                return
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, *a):
-            pass
-
-    socketserver.TCPServer.allow_reuse_address = True
-    try:
-        server = socketserver.TCPServer(("", port), OnlyDashboard)
-    except OSError as e:
-        sys.exit(f"Cannot bind port {port}: {e}\nTry another: python -m pulse phone 8010")
-
-    print()
-    print(qr.terminal(url, "M"), flush=True)
-    print(f"  Scan that, or open:  {url}")
-    if ip.startswith("127."):
-        print("  WARNING: no LAN address detected; your phone may not reach this.")
-    print("  Phone must be on the same wifi. Ctrl-C to stop.\n", flush=True)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("stopped")
-    finally:
-        server.server_close()
 
 
 def _setup(json_path=None):
@@ -179,14 +110,19 @@ def main(argv=None):
             ingest.synthesize(days=days, con=con)
         finally:
             con.close()
+        # Run the whole numeric pipeline on it -- a fast end-to-end check that
+        # parsing + metrics still work before touching a real account. The
+        # dashboard it used to render is gone; the PWA's demo data comes from
+        # web/gen-demo.mjs instead.
         con = ingest.db(cfg.DEMO_DB_PATH)
         try:
-            out, D = render.build(con=con)
+            D = render.compute(con)
         finally:
             con.close()
-        print(f"ok  {out}")
-        print(f"    {len(D['m'])} days, {len(D['hr']):,} heart-rate samples")
-        print("\nnext:  python -m pulse phone")
+        m = D["m"].iloc[-1]
+        print(f"ok  {len(D['m'])} nights, {len(D['hr']):,} heart-rate samples")
+        print(f"    newest: strain {m['strain']:.1f}  recovery {int(m['recovery'])}  "
+              f"sleep {int(m['score'])}")
 
     elif cmd == "setup":
         _setup(arg)
@@ -203,8 +139,8 @@ def main(argv=None):
     elif cmd == "push":
         from . import push as ps
         if arg == "sync":             # catch-up sync, then push -- the CI path.
-            from . import ingest as ig    # Skips the dashboard.html build that
-            print("catching up ...")      # `pulse sync` does and CI never reads.
+            from . import ingest as ig
+            print("catching up ...")
             ig.sync(days=None, verbose=True)
         elif arg:                     # optional: sync N days first, then push
             from . import ingest as ig
@@ -240,7 +176,7 @@ def main(argv=None):
             print("  Paste this output if anything looks wrong.")
 
     elif cmd == "sync":
-        from . import ingest, render
+        from . import ingest
         days = int(arg) if arg else None
         print("catching up from the last cached day ..." if days is None
               else f"pulling {days} days from the Google Health API ...")
@@ -258,23 +194,11 @@ def main(argv=None):
             print(f"  {k:32s} {v:>8,} points")
         if not any(counts.values()):
             sys.exit("\nNothing came back. Run:  python -m pulse doctor")
-        out, D = render.build()
-        print(f"ok  {out}  ({len(D['m'])} days)")
-        print("\nnext:  python -m pulse phone")
-
-    elif cmd == "build":
-        from . import render
-        out, D = render.build()
-        print(f"ok  {out}  ({len(D['m'])} days)")
+        print("\nok  cached. Next:  python -m pulse push")
 
     elif cmd == "test":
         from . import metrics_test
         sys.exit(metrics_test.run())
-
-    elif cmd in ("phone", "serve"):
-        if not cfg.OUT_HTML.exists():
-            sys.exit("No dashboard yet. Run:  python -m pulse demo")
-        _serve(int(arg or 8000))
 
     elif cmd == "status":
         from . import auth, metrics
@@ -296,9 +220,6 @@ def main(argv=None):
                 print(f"  {t:32s} {n:>8,}   {str(lo)[:10]} .. {str(hi)[:10]}")
         else:
             print("cache       : empty (no real data synced yet)")
-        if cfg.OUT_HTML.exists():
-            ts = datetime.fromtimestamp(cfg.OUT_HTML.stat().st_mtime)
-            print(f"dashboard   : {cfg.OUT_HTML.name}, built {ts:%Y-%m-%d %H:%M}")
     else:
         print(__doc__)
 

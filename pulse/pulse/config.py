@@ -33,7 +33,6 @@ def _load_env(path=ENV_FILE):
 _load_env()
 DB_PATH = ROOT / "pulse.db"
 DEMO_DB_PATH = ROOT / "pulse-demo.db"   # demo never touches your real cache
-OUT_HTML = ROOT / "dashboard.html"
 TOKEN_FILE = ROOT / ".token.json"
 
 # ---- USER --------------------------------------------------------------

@@ -7,7 +7,7 @@ name: sync
 # heart-rate requests, ~4 minutes. Nothing is cached between runs on purpose:
 # this repo is PUBLIC, and pulse.db is your raw HR/sleep history -- a cache a
 # fork PR could restore and read is not worth the minutes it saves. Instead
-# `pulse push sync` (== ingest.sync() catch-up + push, no dashboard.html build):
+# `pulse push sync` (== ingest.sync() catch-up + push):
 #   - pulls only ~5 days of heart-rate (a finished day never changes, and HR is
 #     the only heavy type -- ~17k points/day)
 #   - pulls a full ~35-day baseline window of the cheap daily/sleep/steps types

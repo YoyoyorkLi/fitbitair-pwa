@@ -4,9 +4,9 @@
 //
 // `vercel dev` is the real local environment and the only one that serves
 // /api/*; this is the cheaper thing you want most of the time, which is to
-// look at the dashboard on a phone-sized viewport. With no /api/config to
-// answer, app.js falls through to public/demo.json on its own -- the same
-// path a signed-out visitor takes -- so no keys and no network are involved.
+// look at the PWA on a phone-sized viewport. With no /api/config to answer,
+// app.js falls through to public/demo.json on its own -- the same path a
+// signed-out visitor takes -- so no keys and no network are involved.
 import { createServer } from "node:http";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { extname, join, normalize, sep } from "node:path";
