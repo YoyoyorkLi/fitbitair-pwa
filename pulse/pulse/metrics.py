@@ -511,18 +511,22 @@ def _sleep_settled(hrv, hrv_hist, rhr, rhr_hist):
     return (w_hrv * hrv_c + w_rhr * rhr_c) / (w_hrv + w_rhr), parts
 
 
-def sleep_score(night, need_min, timing_dev=None,
+def sleep_score(night, target_min, timing_dev=None,
                 rem_base=None, deep_base=None,
                 settled=None, settled_parts=None):
-    """Sleep score = quality (0-100) x how much of `need` you actually slept.
+    """Sleep score = quality (0-100) x how much of `target_min` you slept.
 
     quality blends "how well you slept" -- efficiency, REM, deep, wake-ups,
     latency, timing, graded against YOUR OWN recent normal where a baseline
     exists and textbook ranges before that -- at 65% with "how settled your
     body got" (overnight HRV / resting HR vs baseline, passed in as `settled`)
-    at 35%. The length multiplier is what stops a short night scoring high
-    however clean it was: 5h against a 7h need caps the score at ~0.71 of
-    quality.
+    at 35%.
+
+    `target_min` is the duration divisor. sleep_series passes NEED plus a
+    capped slice of standing debt, so the length multiplier does two things:
+    a short night can't score high however clean it was (5h vs a 7h target ->
+    x0.71), and a flat 7h night only scores a clean 90 when you're caught up
+    -- carry debt and the target rises toward 8-8.5h.
 
     Returns (score, parts, quality, dur_factor). `parts` is {label: (weight,
     got)} for the breakdown chart; weights are out of 100.
@@ -530,7 +534,7 @@ def sleep_score(night, need_min, timing_dev=None,
     st = night["stages"]
     asleep = max(float(night["asleep"]), 1.0)
     in_bed = max(float(night["in_bed"]), asleep)
-    need_min = max(float(need_min), 1.0)
+    need_min = max(float(target_min), 1.0)
     t0 = night["start"]
     sm = night["stage_min"]
 
@@ -626,15 +630,17 @@ def _sleep_debt(need, asleep):
 def sleep_series(nights, strain_map, hrv_map=None, rhr_map=None, nap_min=None):
     """Per-night frame: need, debt, sleep score and its parts.
 
-    need   flat personal baseline (cfg.SLEEP_NEED_MIN) plus a small bump the
-           night after a hard day. Debt is NOT folded in -- that made the two
-           reinforce each other and pinned need at its ceiling.
-    debt   a rolling window (see _sleep_debt), computed after the loop, over
-           `asleep_total` (main sleep + that day's naps).
-    score  quality x fraction-of-need-slept (see sleep_score) -- MAIN sleep
-           only; a nap doesn't change last night's architecture.
-    perf   asleep_total / need, for recovery()'s sleep term -- naps DO count
-           here.
+    need         flat personal baseline (cfg.SLEEP_NEED_MIN) plus a small bump
+                 the night after a hard day. What debt and recovery-perf are
+                 reckoned against.
+    debt         a rolling window (see _sleep_debt) over `asleep_total` (main
+                 sleep + that day's naps).
+    score_target need PLUS a capped slice of the debt you carried INTO the
+                 night -- the divisor for the SCORE's duration term only, so a
+                 flat 7h night lands a clean 90 only when you're caught up.
+    score        quality x fraction-of-score_target-slept (see sleep_score),
+                 MAIN sleep only -- a nap doesn't change last night's shape.
+    perf         asleep_total / need, for recovery()'s sleep term -- naps count.
 
     nap_min: {civil_date -> minutes}, from nap_minutes(). Keyed to the wake
     date of the main sleep it lands on, so a 3pm nap credits the morning you
@@ -643,16 +649,30 @@ def sleep_series(nights, strain_map, hrv_map=None, rhr_map=None, nap_min=None):
     hrv_map = hrv_map or {}
     rhr_map = rhr_map or {}
     nap_min = nap_min or {}
-    rows = []
-    bed_hist, wake_hist = [], []
-    hrv_hist, rhr_hist, rem_hist, deep_hist = [], [], [], []
+
+    # Pre-pass: need + asleep_total per night, so the rolling sleep debt can be
+    # computed before the scoring loop -- tonight's score is judged against the
+    # debt you carried INTO the night, not the debt after tonight is counted.
+    meta = []
     for n in nights:
         d = n["end"].normalize()
         prev = strain_map.get(d - pd.Timedelta(days=1), 0.0)
         need = cfg.SLEEP_NEED_MIN + min(
             float(cfg.SLEEP_NEED_HARDDAY_MAX), 3.0 * max(0.0, prev - 10))
         naps = float(nap_min.get(d, 0.0))
-        asleep_total = n["asleep"] + naps
+        meta.append((d, need, n["asleep"] + naps, naps))
+
+    if not meta:
+        return pd.DataFrame()
+    debt_vec = _sleep_debt(np.array([m[1] for m in meta]),
+                           np.array([m[2] for m in meta]))
+    debt_in = np.concatenate([[0.0], debt_vec[:-1]])        # debt entering each night
+
+    rows = []
+    bed_hist, wake_hist = [], []
+    hrv_hist, rhr_hist, rem_hist, deep_hist = [], [], [], []
+    for i, n in enumerate(nights):
+        d, need, asleep_total, naps = meta[i]
 
         bed_tod, wake_tod = _tod_since_6pm(n["start"]), _tod_since_6pm(n["end"])
         timing_dev = None
@@ -668,15 +688,24 @@ def sleep_series(nights, strain_map, hrv_map=None, rhr_map=None, nap_min=None):
         hrv, rhr = hrv_map.get(d), rhr_map.get(d)
         settled, settled_parts = _sleep_settled(hrv, hrv_hist, rhr, rhr_hist)
 
+        # The score's duration divisor: your need, plus a capped fraction of the
+        # debt you brought into the night. Caught up (debt ~0) -> == need, so 7h
+        # scores clean. A few hours of debt -> ~8-8.5h, so the same 7h drops
+        # into the 70s until you either sleep long or pay the debt down.
+        score_target = need + min(float(cfg.SLEEP_DEBT_TARGET_CAP),
+                                  cfg.SLEEP_DEBT_TARGET_FRAC * float(debt_in[i]))
+
         score, parts, quality, dur_factor = sleep_score(
-            n, need, timing_dev, rem_base, deep_base, settled, settled_parts)
+            n, score_target, timing_dev, rem_base, deep_base,
+            settled, settled_parts)
         perf = min(1.0, asleep_total / max(need, 1.0))
 
         rows.append({"date": d, "start": n["start"], "end": n["end"],
                      "asleep": n["asleep"], "in_bed": n["in_bed"],
                      "nap_min": naps, "asleep_total": asleep_total,
                      "efficiency": n["asleep"] / max(n["in_bed"], 1.0),
-                     "need": need, "perf": perf,
+                     "need": need, "score_target": round(score_target),
+                     "perf": perf, "debt": float(debt_vec[i]),
                      "score": score, "parts": parts,
                      "quality": quality, "dur_factor": dur_factor,
                      **{k.lower(): n["stage_min"].get(k, 0) for k in STAGES}})
@@ -690,11 +719,7 @@ def sleep_series(nights, strain_map, hrv_map=None, rhr_map=None, nap_min=None):
         rem_hist = (rem_hist + [n["stage_min"].get("REM", 0)])[-cfg.BASELINE_DAYS:]
         deep_hist = (deep_hist + [n["stage_min"].get("DEEP", 0)])[-cfg.BASELINE_DAYS:]
 
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        df["debt"] = _sleep_debt(df["need"].to_numpy(float),
-                                 df["asleep_total"].to_numpy(float))
-    return df
+    return pd.DataFrame(rows)
 
 
 # ------------------------------------------------------------ recovery

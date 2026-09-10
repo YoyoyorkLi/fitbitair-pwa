@@ -66,6 +66,16 @@ SLEEP_DEBT_WINDOW = 14                   # nights in the rolling window
 SLEEP_DEBT_CAP_MIN = 300                 # 5h -- RISE's "manageable" ceiling
 SLEEP_DEBT_SURPLUS_CREDIT = 0.5          # a night over NEED pays down at half rate
 
+# The sleep SCORE's duration term is judged against NEED plus a slice of the
+# debt you carried INTO the night (the debt vs the score are otherwise
+# separate -- this is the one place debt touches the score). So a flat 7h
+# night scores a clean 90 only when you are caught up; carry a few hours of
+# debt and the same 7h is measured against ~8-8.5h and lands in the 70s.
+# Bounded, so it cannot run away the way the old debt-in-NEED formula did:
+# the new debt is capped at 300, and this adds at most +90.
+SLEEP_DEBT_TARGET_FRAC = 0.35
+SLEEP_DEBT_TARGET_CAP  = 90              # minutes; +1.5h over NEED at most
+
 # The API returns every point as a UTC instant. Without a zone, a Chicago
 # evening (UTC-5) lands on the following UTC day and every evening workout is
 # filed under tomorrow. None = auto-detect from the OS.

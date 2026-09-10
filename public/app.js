@@ -748,6 +748,13 @@ function dayView(D, i) {
   const at = (a) => (Array.isArray(a) && ok(a[i]) ? a[i] : NaN);
   const round = (v) => (ok(v) ? Math.round(v) : NaN);
   const asleep = at(D.asleep), inBed = at(D.inBed), strain = at(D.strain);
+  const need = at(D.need);
+  // The debt you carried INTO this night is the prior night's stored debt.
+  // The score's duration term divides by need + a capped slice of it (mirrors
+  // SLEEP_DEBT_TARGET_* in metrics.py) -- so a flat 7h only scores clean when
+  // you're caught up. For display/explanation; the score itself is computed
+  // server-side.
+  const debtIn = i > 0 && ok(D.debt?.[i - 1]) ? D.debt[i - 1] : 0;
   return {
     i, night: D.dates[i],
     strain: ok(strain) ? +strain.toFixed(1) : NaN,
@@ -755,7 +762,8 @@ function dayView(D, i) {
     score: round(at(D.score)),
     hrv: at(D.hrv), hrvBaseline: at(D.hrvBaseline), rhr: round(at(D.rhr)),
     eff: ok(asleep) && inBed > 0 ? Math.round((asleep / inBed) * 100) : NaN,
-    debt: at(D.debt), asleep, need: at(D.need), target: at(D.target),
+    debt: at(D.debt), asleep, need, target: at(D.target),
+    scoreTarget: ok(need) ? Math.round(need + Math.min(90, 0.35 * debtIn)) : NaN,
     deep: at(D.deep), light: at(D.light), rem: at(D.rem), awake: at(D.awake),
     drinks: Number(D.drinks[i] || 0), steps: at(D.steps),
   };
@@ -1034,7 +1042,7 @@ function renderDay() {
     <div class="kpis">
       ${kpi(ch.gauge(t.strain, 21, ok(t.target) && t.strain > t.target ? col("warn") : col("strain"), "Day Strain", `Day Strain ${t.strain} of 21|waking heart-rate load — sleep doesn't count${ok(t.target) ? `|stay under ${t.target} today` : ""}`), "Day Strain", ok(t.target) ? `under ${t.target}` : "", "strain")}
       ${kpi(ch.ring(t.recovery, recCol, "Recovery", `Recovery ${t.recovery}|55% HRV · 25% resting HR · 20% sleep`), "Recovery", `${t.recovery >= 67 ? "well recovered" : t.recovery >= 34 ? "moderate" : "low"}${t.drinks ? ` · ${t.drinks} drink${t.drinks > 1 ? "s" : ""}` : ""}`, "recovery")}
-      ${kpi(ch.ring(t.score, ok(t.score) && t.score >= 80 ? col("good") : col("awake"), "Sleep Score", ok(t.score) ? `Sleep Score ${t.score}|how well + how settled, × the fraction of ${hm(t.need)} you slept` : "No sleep recorded|this night has not been scored"), "Sleep Score", ok(t.asleep) ? hm(t.asleep) : "not yet", "sleep")}
+      ${kpi(ch.ring(t.score, ok(t.score) && t.score >= 80 ? col("good") : col("awake"), "Sleep Score", ok(t.score) ? `Sleep Score ${t.score}|how well + how settled, scaled to how long you slept vs what you needed — more when you're carrying sleep debt` : "No sleep recorded|this night has not been scored"), "Sleep Score", ok(t.asleep) ? hm(t.asleep) : "not yet", "sleep")}
     </div>
     ${strip}
     <div class="card"><div class="stats">
@@ -1518,15 +1526,19 @@ function renderDetailBody(kind) {
   const tonightNeed = i === D.dates.length - 1 && ok(D.strain[i])
     ? NEED_MIN + Math.min(30, 3 * Math.max(0, D.strain[i] - 10))
     : NaN;
+  // How the score judged this night: need, plus a capped slice of the debt
+  // carried in. When that's bigger than the bare need, a flat 7h night is
+  // being measured against ~8h and can't score a clean 90.
+  const debtBump = ok(sn.scoreTarget) && ok(sn.need) ? sn.scoreTarget - sn.need : 0;
   return `
     ${slept ? "" : `<div class="banner">No sleep recorded for <b>${t.night}</b> — showing the night of
       <b>${sn.night ?? "the last full night"}</b>.</div>`}
-    <div class="detail-dial">${ch.ring(sn.score, ok(sn.score) && sn.score >= 80 ? col("good") : col("awake"), "Sleep Score", ok(sn.score) ? `Sleep Score ${sn.score}|how well + how settled, × the fraction of ${hm(sn.need)} you slept` : "No sleep recorded|this night has not been scored")}</div>
+    <div class="detail-dial">${ch.ring(sn.score, ok(sn.score) && sn.score >= 80 ? col("good") : col("awake"), "Sleep Score", ok(sn.score) ? `Sleep Score ${sn.score}|how well + how settled, × the fraction of ${hm(ok(sn.scoreTarget) ? sn.scoreTarget : sn.need)} you slept` : "No sleep recorded|this night has not been scored")}</div>
     <p class="note center">${ok(sn.asleep) ? `<b>${hm(sn.asleep)}</b> asleep of <b>${hm(sn.need)}</b> needed${ok(sn.asleep) && sn.asleep >= GOAL_MIN ? " · hit your 8h goal" : ""}` : "not yet scored"}</p>
     <div class="card"><div class="stats">
       ${stat(ok(sn.asleep) ? hm(sn.asleep) : "—", "Asleep")}${stat(ok(sn.eff) ? sn.eff + "%" : "—", "Efficiency")}
       ${stat(ok(sn.need) ? hm(sn.need) : "—", "Needed last night")}${stat(ok(sn.score) ? sn.score : "—", "Sleep Score", sn.score >= 80 ? col("good") : col("awake"))}
-    </div>${ok(tonightNeed) ? `<p class="note">Needed tonight: <b>${hm(tonightNeed)}</b> — a flat 7h baseline${tonightNeed > NEED_MIN ? ", plus a little for today's exertion" : ""}. Your 8h goal is the stretch target; sleep debt is tracked separately below, not added here.</p>` : ""}</div>
+    </div>${debtBump > 5 ? `<p class="note">Scored against <b>${hm(sn.scoreTarget)}</b> — your ${hm(sn.need)} need plus <b>${hm(debtBump)}</b> because you went in carrying sleep debt. Sleep long or pay the debt down and the same night scores higher.</p>` : ok(tonightNeed) ? `<p class="note">Needed tonight: <b>${hm(tonightNeed)}</b> — a flat 7h baseline${tonightNeed > NEED_MIN ? ", plus a little for today's exertion" : ""}. Carrying debt raises the bar the score is measured against; your 8h goal is the stretch target.</p>` : ""}</div>
     ${card("Hypnogram", ch.hypnogram(W, hyp))}
     ${card("Heart rate during sleep", ch.hrIntraday(W, { curve: sleepHrCurve(D, sIdx, hyp), hrmax: D.hrmax, rhr: sn.rhr }))}
     ${card(`REM — ${remDays} nights`, ch.sparkline(W, D, D.rem, col("rem"), remDays, "min"))}

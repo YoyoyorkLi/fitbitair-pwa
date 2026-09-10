@@ -96,6 +96,35 @@ def short_night_cannot_score_high():
 
 
 @case
+def debt_lowers_a_flat_seven_hour_night():
+    """A clean 7h night scores ~90 when caught up, but noticeably lower when
+    you go in carrying sleep debt -- the score's target rises toward 8h."""
+    base = pd.Timestamp("2026-08-20 23:15:00")
+    clean7 = lambda s: _night(cfg.SLEEP_NEED_MIN, rem=98, deep=88, awake_segs=[1], start=s)
+
+    caught_up = [clean7(base + pd.Timedelta(days=i)) for i in range(12)]
+    sf_ok = mx.sleep_series(caught_up, {}, None, None, None)
+    assert sf_ok["debt"].iloc[-1] < 30, sf_ok["debt"].iloc[-1]
+    assert sf_ok["score"].iloc[-1] >= 85, sf_ok["score"].iloc[-1]
+    assert sf_ok["score_target"].iloc[-1] <= cfg.SLEEP_NEED_MIN + 15
+
+    # a rough week: 5.5h nightly, then the SAME clean 7h night on top
+    rough = [_night(330, rem=70, deep=70, awake_segs=[1], start=base + pd.Timedelta(days=i))
+             for i in range(11)]
+    rough.append(clean7(base + pd.Timedelta(days=11)))
+    sf_tired = mx.sleep_series(rough, {}, None, None, None)
+    assert sf_tired["debt"].iloc[-2] > 120, sf_tired["debt"].iloc[-2]
+    assert sf_tired["score_target"].iloc[-1] > cfg.SLEEP_NEED_MIN + 40
+    assert sf_tired["score"].iloc[-1] <= sf_ok["score"].iloc[-1] - 8, \
+        (sf_tired["score"].iloc[-1], sf_ok["score"].iloc[-1])
+    # ...and sleeping 8h+ that same tired night claws most of it back
+    rough8 = rough[:-1] + [_night(500, rem=115, deep=95, awake_segs=[1],
+                                  start=base + pd.Timedelta(days=11))]
+    sf_long = mx.sleep_series(rough8, {}, None, None, None)
+    assert sf_long["score"].iloc[-1] >= sf_tired["score"].iloc[-1] + 6
+
+
+@case
 def drinking_night_scores_far_below_seventy_six():
     """The night that motivated the rebuild: ~5h, REM suppressed, body not
     settled. Old additive score ~76; new score should be well under 60."""

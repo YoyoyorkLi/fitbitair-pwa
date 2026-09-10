@@ -291,7 +291,11 @@ def build(out_path=None, con=None):
   {_card(f"Sleep score {score}/100", ch.score_breakdown(parts),
          f"Quality {last_night['quality']:.0f}/100 (how well you slept + how "
          f"settled your body got), then multiplied by {last_night['dur_factor']:.2f} "
-         f"— the fraction of your {_hm(last_night['need'])} need you actually slept.")}
+         f"— the fraction of {_hm(last_night['score_target'])} you slept"
+         + (f" ({_hm(last_night['need'])} need + "
+            f"{_hm(last_night['score_target'] - last_night['need'])} for standing "
+            f"sleep debt)." if last_night['score_target'] > last_night['need'] + 1
+            else "."))}
   {_card("Stages vs your 30-night baseline", ch.stage_bars(tonight, baseline),
          "Google dropped <code>thirtyDayAvgMinutes</code> from the v4 sleep schema, "
          "so this baseline is rebuilt from your own stored history.")}
