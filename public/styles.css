@@ -253,12 +253,11 @@ a{color:var(--accent)}
    the calendar below is for backfilling past nights. */
 .lognow{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;
   background:var(--drink);color:#0B0E14;border:0;border-radius:8px;
-  padding:16px;font-weight:600;font-size:15.5px;letter-spacing:-.01em;
+  padding:16px;margin-bottom:16px;font-weight:600;font-size:15.5px;letter-spacing:-.01em;
   -webkit-tap-highlight-color:transparent}
 .lognow:active{filter:brightness(.92)}
 .lognow .plus{font-size:19px;font-weight:500;line-height:1}
-.nowempty{margin:11px 0 22px !important;text-align:center}
-.nowlist{margin:13px 0 24px}
+.nowlist{margin:0 0 22px}
 .nowhd{margin:0 0 8px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 .nowhd b{color:var(--text)}
 .nowrow{display:flex;align-items:center;gap:12px;background:var(--panel2);

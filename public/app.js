@@ -1811,7 +1811,7 @@ function renderDrinksTab(D) {
       ${tn.map((r, k) => `<div class="nowrow"><span class="nown">${k + 1}</span>
         <span class="nowt">${time12(r.logged_at)}</span>
         <button type="button" class="nowdel" data-del-now="${r.id}" aria-label="Delete drink ${k + 1}">×</button></div>`).join("")}
-    </div>` : `<p class="note nowempty">Or tap a past night below to add a forgotten drink.</p>`}`;
+    </div>` : ""}`;
 
   $("drinks").innerHTML = `
     ${nowBlock}
