@@ -35,15 +35,21 @@ const chartsInline = charts.replace(/^export\s+/gm, "");
 const appInline = app
   .replace(/^import[^;]+;\s*$/gm, "")                  // drop both imports
   .replace(/\bcreateClient\b/g, "(() => null)")        // supabase never runs here
-  .replace(/^if \("serviceWorker".*$/gm, "");          // no /sw.js in a single file
+  .replace(/^if \("serviceWorker".*$/gm, "")           // no /sw.js in a single file
+  .replace(/^\s*\$\("demo-banner"\).*$/gm, "");        // banner removed below
 
-// body of index.html, minus the module script tag we are replacing
+// body of index.html, minus the module script tag we are replacing and the
+// in-app "synthetic data" disclaimer -- the artifact carries that in its
+// description, and the banner just clutters a showcase.
 const body = html
   .replace(/[\s\S]*<body[^>]*>/i, "")
   .replace(/<\/body>[\s\S]*/i, "")
+  .replace(/<div class="banner" id="demo-banner"[\s\S]*?<\/div>/i, "")
   .replace(/<script[\s\S]*?<\/script>/gi, "");
 
-const page = `<title>Pulse Dashboard Preview</title>
+const page = `<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pulse dashboard</title>
 <style>
 ${css}
 /* preview chrome: the artifact has no service worker or safe-area insets */
