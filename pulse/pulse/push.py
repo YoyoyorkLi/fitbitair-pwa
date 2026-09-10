@@ -295,6 +295,25 @@ def _skin_temp(con):
     return out
 
 
+def _spo2_bounds(con):
+    """Overnight blood-oxygen floor + spread: {night -> (lower_pct, sd_pct)}.
+
+    normalize_daily keeps only one field (the average, stored as `spo2`); the
+    API also returns lowerBoundPercentage and standardDeviationPercentage on the
+    same point. A low floor or wide spread is a breathing-disturbance signal.
+    Either field can be missing for a night -- keep the row if at least one is.
+    """
+    out = {}
+    for p in ingest.load("daily-oxygen-saturation", con):
+        b = p.get("dailyOxygenSaturation") or {}
+        d = mx._civil_date(b.get("date"))
+        lo = mx._f(b.get("lowerBoundPercentage"))
+        sd = mx._f(b.get("standardDeviationPercentage"))
+        if d and (lo is not None or sd is not None):
+            out[pd.Timestamp(d)] = (lo, sd)
+    return out
+
+
 def build_rows(con=None):
     """Every night we can compute, shaped for the nights table."""
     own = con is None
@@ -317,19 +336,26 @@ def build_rows(con=None):
     rr = dict(zip(D["rr"]["date"], D["rr"][rr_f])) if not D["rr"].empty else {}
     hrv_map, rhr_map = D["hrv_map"], D["rhr_map"]
 
-    # Two raw-points pulls that don't go through normalize_daily: the deep-sleep
-    # RMSSD (rides in the HRV payload, not in DAILY_FIELDS) and the skin-temp
-    # triple (nightly / baseline / SD). `con` is already closed if we own it.
-    deep_rmssd, skin_temp = {}, {}
+    # Raw-points pulls that don't go through normalize_daily: two extra fields on
+    # the HRV payload (deep-sleep RMSSD, non-REM HR), the skin-temp triple, and
+    # the SpO2 bounds. `con` is already closed if we own it.
+    deep_rmssd, non_rem_hr, skin_temp, spo2_bnd = {}, {}, {}, {}
     con2 = ingest.db() if own else con
     try:
         for p in ingest.load("daily-heart-rate-variability", con2):
             b = p.get("dailyHeartRateVariability") or {}
             d = mx._civil_date(b.get("date"))
+            if not d:
+                continue
+            d = pd.Timestamp(d)
             v = mx._f(b.get("deepSleepRootMeanSquareOfSuccessiveDifferencesMilliseconds"))
-            if d and v is not None:
-                deep_rmssd[pd.Timestamp(d)] = v
+            if v is not None:
+                deep_rmssd[d] = v
+            nr = mx._f(b.get("nonRemHeartRateBeatsPerMinute"))
+            if nr is not None:
+                non_rem_hr[d] = nr
         skin_temp = _skin_temp(con2)
+        spo2_bnd = _spo2_bounds(con2)
     finally:
         if own:
             con2.close()
@@ -338,31 +364,60 @@ def build_rows(con=None):
     # date of its end so each row can carry its own hypnogram.
     by_night = {pd.Timestamp(n["end"]).normalize(): n for n in D["nights"]}
 
+    # Pre-pass: the overnight HR nadir per night. Needed per row (the dot on the
+    # hypnogram) and as a trailing series for hr_nadir_min_baseline -- the
+    # personal normal for how long after sleep onset the floor lands.
+    #
+    # NOT fed into recovery_load: the backfill showed the smoothed global
+    # minimum's *timing* has a ~83 min personal sigma and a ~120 min mean
+    # night-to-night swing on real data -- the argmin of a near-flat overnight
+    # trough is mostly noise. The direction (late = took longer to settle) is
+    # right (it's Oura's Recovery Index input), but this needs a proper
+    # settling-time detector, not a raw argmin, before it can carry weight.
+    nadir = {}                          # night -> (bpm|None, at_ts|None, min_to|None)
+    for _, r in m.iterrows():
+        night = pd.Timestamp(r["date"])
+        start, end = r.get("start"), r.get("end")
+        nb, na = _nadir(hr, start, end)
+        mtn = None
+        if na is not None and not pd.isna(start):
+            mtn = float((pd.Timestamp(na) - pd.Timestamp(start)).total_seconds() / 60)
+        nadir[night] = (nb, na, mtn)
+    nadir_min_series = {k: v[2] for k, v in nadir.items() if v[2] is not None}
+
     rows = []
     for _, r in m.iterrows():
         night = pd.Timestamp(r["date"])
         night_obj = by_night.get(night)
         start, end = r.get("start"), r.get("end")
-        nadir_bpm, nadir_at = _nadir(hr, start, end)
+        nadir_bpm, nadir_at, _nadir_mtn = nadir[night]
 
         st = skin_temp.get(night)                       # (nightly, baseline, sd) | None
+        sb = spo2_bnd.get(night)                        # (lower_pct, sd_pct) | None
         body_load = mx.recovery_load(
             hrv_map.get(night), _hist(hrv_map, night),
             rhr_map.get(night), _hist(rhr_map, night),
             rr.get(night), _hist(rr, night),
             (st[0] - st[1]) if st else None,
-            st[2] if st else None)
+            st[2] if st else None,
+            hrv_deep=deep_rmssd.get(night),
+            hrv_deep_hist=_hist(deep_rmssd, night))
 
         rows.append({
             "night": night.strftime("%Y-%m-%d"),
             "hrv_rmssd": _clean(hrv_map.get(night)),
             "hrv_baseline": _clean(_baseline(hrv_map, night)),
             "hrv_deep_rmssd": _clean(deep_rmssd.get(night)),
+            "hrv_deep_baseline": _clean(_baseline(deep_rmssd, night)),
+            "non_rem_hr": _clean(non_rem_hr.get(night)),
+            "non_rem_hr_baseline": _clean(_baseline(non_rem_hr, night)),
             "rhr": _clean(rhr_map.get(night)),
             "rhr_baseline": _clean(_baseline(rhr_map, night)),
             "resp_rate": _clean(rr.get(night)),
             "resp_rate_baseline": _clean(_baseline(rr, night)),
             "spo2": _clean(spo2.get(night)),
+            "spo2_min": _clean(sb[0] if sb else None),
+            "spo2_sd": _clean(sb[1] if sb else None),
             "skin_temp_c": _clean(st[0] if st else None),
             "skin_temp_baseline_c": _clean(st[1] if st else None),
             "body_load": _clean(body_load),
@@ -386,6 +441,7 @@ def build_rows(con=None):
             "stages": _stages(night_obj),
             "hr_nadir_bpm": _clean(nadir_bpm),
             "hr_nadir_at": _clean(nadir_at),
+            "hr_nadir_min_baseline": _clean(_baseline(nadir_min_series, night)),
             "hr_curve": _curve(hr, night),
         })
     # int columns in Postgres reject 374.5

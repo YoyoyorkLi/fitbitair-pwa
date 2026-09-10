@@ -117,12 +117,29 @@ create table public.nights (
   -- a controlled state, so plausibly the steadier alcohol marker of the two.
   -- Stored alongside rather than instead of: the average is what the Google
   -- Health app shows, so it is the one whose numbers you can cross-check.
+  -- hrv_deep_baseline is its own trailing-median reference (migration 002),
+  -- so the PWA can show it as a second "% of normal" lens next to the average.
   hrv_deep_rmssd  numeric,
+  hrv_deep_baseline numeric,
+
+  -- Rides the same HRV payload: a resting HR measured in stable non-REM sleep
+  -- (nonRemHeartRateBeatsPerMinute). The RHR analogue of the deep-sleep RMSSD
+  -- lens -- steadier state than the all-day RHR below. Own trailing-median
+  -- baseline (migration 002); the view exposes non_rem_hr_delta.
+  non_rem_hr      numeric,
+  non_rem_hr_baseline numeric,
+
   rhr             numeric,
   rhr_baseline    numeric,
   resp_rate       numeric,
   resp_rate_baseline numeric,
+
+  -- SpO2: the nightly average, plus the floor and spread the API also returns
+  -- (lowerBoundPercentage / standardDeviationPercentage -- migration 002). A
+  -- low floor or wide spread is a breathing-disturbance / congestion signal.
   spo2            numeric,   -- averagePercentage
+  spo2_min        numeric,   -- lowerBoundPercentage
+  spo2_sd         numeric,   -- standardDeviationPercentage
 
   -- Overnight skin-temperature (daily-sleep-temperature-derivations): the
   -- absolute nightly mean and Google's own rolling baseline. The delta feeds
@@ -176,11 +193,15 @@ create table public.nights (
   -- The ribbon is drawn from transitions, not from the per-stage totals above.
   stages          jsonb,
 
-  -- Time-to-nadir is the sleeper metric of this whole project. On a sober
-  -- night HR bottoms out ~90 min after sleep onset; alcohol pushes it by
-  -- hours and never lets it go as low. Less night-to-night noise than HRV.
+  -- Lowest smoothed HR during sleep + when it landed. The dot on the hypnogram.
+  -- hr_nadir_min_baseline (migration 002) is the personal median gap from sleep
+  -- onset to that low, and the view exposes tonight-minus-normal as
+  -- nadir_delay_min -- but both are PARKED: the raw-argmin timing was too noisy
+  -- on real data (~83 min sigma) to use. Kept for a future settling-time
+  -- detector. See METRICS.md "HR nadir timing".
   hr_nadir_bpm    smallint,
   hr_nadir_at     timestamptz,
+  hr_nadir_min_baseline numeric,
 
   -- The overnight curve for the Night screen. As jsonb rather than a samples
   -- table because the access pattern is always "give me this one night, whole"
@@ -313,7 +334,29 @@ select
   n.resp_rate_baseline,
   case when n.resp_rate is not null and n.resp_rate_baseline is not null
        then round((n.resp_rate - n.resp_rate_baseline)::numeric, 2) end as resp_rate_delta,
-  n.body_load
+  n.body_load,
+
+  -- deep-sleep HRV lens + non-REM HR + nadir timing + SpO2 bounds (migration
+  -- 002). Same rule: appended at the END so `create or replace view` in that
+  -- migration matches this block line for line.
+  n.hrv_deep_baseline,
+  case when n.hrv_deep_baseline > 0
+       then round(100.0 * n.hrv_deep_rmssd / n.hrv_deep_baseline, 1) end as hrv_deep_pct_baseline,
+
+  n.non_rem_hr, n.non_rem_hr_baseline,
+  case when n.non_rem_hr is not null and n.non_rem_hr_baseline is not null
+       then round((n.non_rem_hr - n.non_rem_hr_baseline)::numeric, 1) end as non_rem_hr_delta,
+
+  n.hr_nadir_min_baseline,
+  case when n.sleep_start is not null and n.hr_nadir_at is not null
+            and n.hr_nadir_min_baseline is not null
+       then round(extract(epoch from (n.hr_nadir_at - n.sleep_start)) / 60
+                  - n.hr_nadir_min_baseline)::int end as nadir_delay_min,
+
+  n.spo2_min,
+  case when n.spo2 is not null and n.spo2_min is not null
+       then round((n.spo2 - n.spo2_min)::numeric, 1) end as spo2_drop,
+  n.spo2_sd
 from public.nights n
 full outer join (
   select night,

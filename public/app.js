@@ -55,7 +55,11 @@ function loadMarkers(t) {
   const b = [];
   if (ok(t.skinTempDelta) && Math.abs(t.skinTempDelta) >= 0.15)
     b.push(`skin temp ${t.skinTempDelta > 0 ? "+" : ""}${t.skinTempDelta.toFixed(1)}°C`);
-  if (ok(t.hrv) && ok(t.hrvBaseline) && t.hrv < t.hrvBaseline * 0.92)
+  // Prefer the deep-sleep RMSSD lens -- what recovery_load now uses for the HRV
+  // marker -- and fall back to the all-night average when it has no baseline.
+  if (ok(t.hrvDeepPct) && t.hrvDeepPct < 92)
+    b.push(`deep-sleep HRV ${Math.round(t.hrvDeepPct)}% of normal`);
+  else if (ok(t.hrv) && ok(t.hrvBaseline) && t.hrv < t.hrvBaseline * 0.92)
     b.push(`HRV ${Math.round((t.hrv / t.hrvBaseline) * 100)}% of normal`);
   if (ok(t.rhrDelta) && t.rhrDelta >= 2) b.push(`resting HR +${Math.round(t.rhrDelta)}`);
   if (ok(t.respRateDelta) && t.respRateDelta >= 0.5) b.push(`breathing +${t.respRateDelta.toFixed(1)}`);
@@ -609,7 +613,9 @@ function normalize(D) {
     : only(D.workout_list || []).map((v) => v || []);
 
   for (const k of ["inBed", "need", "hrvBaseline", "bodyLoad", "loadState",
-                   "skinTempDelta", "respRate", "respRateDelta", "rhrDelta"]) D[k] ??= [];
+                   "skinTempDelta", "respRate", "respRateDelta", "rhrDelta",
+                   "hrvDeep", "hrvDeepBaseline", "hrvDeepPct", "nonRemHr",
+                   "spo2Min"]) D[k] ??= [];
   // Not indexed by D.dates -- a flat list of the current drinking-night's
   // drinks, so it is not touched by trimInProgressNight below.
   D.tonight ??= [];
@@ -646,6 +652,7 @@ function trimInProgressNight(D) {
                    "inBed", "need", "hrvBaseline", "debt", "score", "recovery", "strain",
                    "steps", "drinks", "target", "curves", "hypnos",
                    "bodyLoad", "loadState", "skinTempDelta", "respRate", "respRateDelta", "rhrDelta",
+                   "hrvDeep", "hrvDeepBaseline", "hrvDeepPct", "nonRemHr", "spo2Min",
                    "workouts", "drinkTimes", "drinkRows", "firstDrink", "lastDrink"]) {
     if (Array.isArray(D[k])) D[k].pop();
   }
@@ -696,6 +703,14 @@ async function loadLive() {
     bodyLoad, loadState: bodyLoad.map(loadStateOf),
     skinTempDelta: num("skin_temp_delta"), respRate: num("resp_rate"),
     respRateDelta: num("resp_rate_delta"), rhrDelta: num("rhr_delta"),
+    // migration 002: the deep-sleep HRV lens, non-REM HR, SpO2 floor. The view
+    // also carries hrv_deep_rmssd's raw value, non_rem_hr_delta, spo2_drop and
+    // spo2_sd (stored for later) and hr_nadir_min_baseline / nadir_delay_min
+    // (parked as too noisy -- see METRICS.md); the PWA reads only these.
+    hrvDeep: num("hrv_deep_rmssd"), hrvDeepBaseline: num("hrv_deep_baseline"),
+    hrvDeepPct: num("hrv_deep_pct_baseline"),
+    nonRemHr: num("non_rem_hr"),
+    spo2Min: num("spo2_min"),
     hrmax: Number(last.hrmax) || 192,
     // Per night, not just the newest one: hr_curve and stages are columns on
     // every row of night_summary and are already in this response (select "*"),
@@ -835,6 +850,7 @@ function dayView(D, i) {
     bodyLoad: at(D.bodyLoad),
     loadState: Array.isArray(D.loadState) && Number.isInteger(D.loadState[i]) ? D.loadState[i] : NaN,
     skinTempDelta: at(D.skinTempDelta), respRateDelta: at(D.respRateDelta), rhrDelta: at(D.rhrDelta),
+    hrvDeepPct: at(D.hrvDeepPct),
   };
 }
 // The newest night keeps whatever richer object the source handed us (demo.json
@@ -1642,6 +1658,10 @@ function renderDetailBody(kind) {
     const hrvPct = Math.round((t.hrv / hrvBaseUsed) * 100);
     const hasTemp = Array.isArray(D.skinTempDelta) && D.skinTempDelta.some(ok);
     const hasRR = Array.isArray(D.respRate) && D.respRate.some(ok);
+    const hasDeep = Array.isArray(D.hrvDeepPct) && D.hrvDeepPct.some(ok);
+    const hasNonRem = Array.isArray(D.nonRemHr) && D.nonRemHr.some(ok);
+    const hasSpo2Min = Array.isArray(D.spo2Min) && D.spo2Min.some(ok);
+    const deepPct = ok(t.hrvDeepPct) ? Math.round(t.hrvDeepPct) : NaN;
     const bits = loadMarkers(t);
     const loadCard = ok(t.bodyLoad) && Number.isInteger(t.loadState)
       ? `<div class="card loadcard l${t.loadState}">
@@ -1655,13 +1675,20 @@ function renderDetailBody(kind) {
     return `
       <div class="detail-dial">${ch.ring(t.recovery, recCol, "Recovery", `Recovery ${t.recovery}|55% HRV · 25% resting HR · 20% sleep`)}</div>
       <p class="note center">55% HRV · 25% resting heart rate · 20% sleep score, each against your
-        rolling baseline${ok(hrvPct) ? ` — HRV is <b>${hrvPct}%</b> of yours` : ""}.</p>
+        rolling baseline${ok(hrvPct) ? ` — HRV is <b>${hrvPct}%</b> of yours` : ""}${
+        ok(deepPct) ? ` (deep-sleep HRV <b>${deepPct}%</b>)` : ""}.</p>
       ${loadCard}
       ${card(`Recovery — ${trendDays} days`, ch.sparkline(W, D, D.recovery, recCol, trendDays, ""))}
       ${card(`HRV (rMSSD) — ${trendDays} days`, ch.sparkline(W, D, D.hrv, col("accent"), trendDays, "ms"))}
+      ${hasDeep ? card(`Deep-sleep HRV vs baseline — ${trendDays} nights`, ch.sparkline(W, D, D.hrvDeepPct, col("accent"), trendDays, "%"),
+        "A true rMSSD measured in deep sleep only — a cleaner autonomic read than the all-night average, and Recovery Load uses it in place of the average once it has a baseline.") : ""}
       ${card(`Resting heart rate — ${trendDays} days`, ch.sparkline(W, D, D.rhr, col("warn"), trendDays, "bpm"))}
+      ${hasNonRem ? card(`Non-REM resting HR — ${trendDays} nights`, ch.sparkline(W, D, D.nonRemHr, col("warn"), trendDays, "bpm"),
+        "Resting HR measured in stable non-REM sleep — the RHR analogue of the deep-sleep HRV lens.") : ""}
       ${hasTemp ? card(`Skin temperature vs baseline — ${trendDays} nights`, ch.sparkline(W, D, D.skinTempDelta, col("warn"), trendDays, "°C")) : ""}
       ${hasRR ? card(`Respiratory rate — ${trendDays} nights`, ch.sparkline(W, D, D.respRate, col("accent"), trendDays, "br/min")) : ""}
+      ${hasSpo2Min ? card(`Blood-oxygen low — ${trendDays} nights`, ch.sparkline(W, D, D.spo2Min, col("accent"), trendDays, "%"),
+        "The night's lowest SpO₂, from the range the API reports. A low floor or a wide swing points at breathing — congestion, a cold, altitude. Too coarse for an apnea screen.") : ""}
       ${card(`Sleep Score — ${trendDays} nights`, ch.sparkline(W, D, D.score, col("rem"), trendDays, ""))}`;
   }
 

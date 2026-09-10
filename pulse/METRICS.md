@@ -230,13 +230,28 @@ stressed, bad sleep environment. Stored as `body_load`; the reader (`app.js`,
 
 | marker | value | baseline · spread | bad direction |
 |---|---|---|---|
-| HRV | `averageHeartRateVariabilityMilliseconds` | trailing 30-night median · 1.4826·MAD | ↓ down |
+| HRV | deep-sleep RMSSD, else all-night average (see below) | trailing 30-night median · 1.4826·MAD | ↓ down |
 | resting HR | `daily_resting_heart_rate.beatsPerMinute` | trailing median · 1.4826·MAD | ↑ up |
 | respiratory rate | `daily_respiratory_rate.breathsPerMinute` | trailing median · 1.4826·MAD | ↑ up |
 | skin temp | `nightlyTemperatureCelsius` | **Google's** `baselineTemperatureCelsius` · `relativeNightlyStddev30dCelsius` | ↑ up |
 
+**HRV marker.** The API returns a true RMSSD scoped to deep sleep
+(`deepSleepRootMeanSquareOfSuccessiveDifferencesMilliseconds`) alongside the
+all-night average. Probed across 42 nights it has 100 % coverage and tracks the
+average at r ≈ 0.85 — but on the (small sample of) logged drinking nights it fell
+~44 % below personal baseline vs the average's ~23 %, and on one night the
+average had already recovered to normal by wake while the deep value had not.
+`recovery_load` uses the deep RMSSD once it has its own trailing baseline
+(`hrv_deep_baseline`), with a **wider floor** (5 ms vs 3) because its sober-night
+spread runs ~1.5× the average's. It falls back to the all-night average when the
+deep baseline isn't there yet. `recovery()` and the sleep *settled* score still
+use the average only — this lens is Recovery-Load-only until it has more drinking
+nights behind it. First-backfill caveat: this person's deep-RMSSD series is on a
+strong upward trend right now, which inflates its 30-night MAD and makes the
+marker conservative until the baseline catches up.
+
 Skin temp uses Google's own baseline + SD (computed from the intra-night samples
-we don't get); the other three use a robust median + MAD from `push._hist`.
+we don't get); the rest use a robust median + MAD from `push._hist`.
 
 ### The math
 
@@ -245,14 +260,17 @@ per marker m:
     σ_m = 1.4826 · MAD(hist_m)               # None with < 5 clean nights
     z_m = (value − median) / σ_m             # temp: delta / google_sd
     d_m = clip( bad-direction part of z_m , 0, 3 )
-    d_m = 0  if |value − baseline| < floor_m     # floor: hrv 3ms, rhr 2bpm, temp 0.15°C, rr 0.5
+    d_m = 0  if |value − baseline| < floor_m     # floor: hrv 3ms (deep 5), rhr 2bpm,
+                                                 #        temp 0.15°C, rr 0.5
 
 weights w = { hrv 0.35, rhr 0.25, temp 0.25, rr 0.15 }   # sum = 1
 body_load = Σ w_m · d_m                       # present-but-normal (d_m = 0) contributes nothing,
                                               #   same as a missing marker — a reading the watch
                                               #   didn't get is not evidence of anything
-body_load = max( body_load , max(d_m) / 2 )   # lone-signal override: one ~2σ marker (skin temp
-                                              #   ≈ fever) reaches "high" on its own
+body_load = max( body_load , d_temp / 2 )     # fever override: a ~2σ skin-temp rise alone
+                                              #   reaches "high". SKIN TEMP ONLY — an
+                                              #   unrestricted max(d)/2 flagged ordinary
+                                              #   nights off a lone +1 br/min breathing blip
 ```
 
 Returns `None` when no marker has ≥ 5 nights of history. Weights: HRV highest (the
@@ -267,8 +285,53 @@ the PWA reconciles: *"3 drinks — expected"* vs *"nothing logged — check in."
 ### Degrades gracefully
 
 Skin temp only started syncing after the data type was added, so most history
-computes from 3 markers. A night with no main sleep, or the first ~5 nights, get
-`body_load = null`.
+computes from 3–4 markers. A night with no main sleep, or the first ~5 nights,
+get `body_load = null`.
+
+---
+
+## HR nadir timing — *parked*
+
+`hr_nadir_at` / `min_to_nadir` (stored, and drawn as a dot on the hypnogram):
+the lowest smoothed heart rate during sleep, and how long after sleep onset it
+landed. The direction of interest is real — Oura's Recovery Index is literally
+*hours of sleep after the HR low*, and a late nadir means "took longer to
+settle."
+
+`hr_nadir_min_baseline` (trailing median) and the view's `nadir_delay_min` are
+computed and stored, **but nothing reads them yet.** The first backfill showed
+the smoothed *global* minimum's timing has a ~83 min personal σ and a ~120 min
+mean night-to-night swing on real data — the `argmin` of a near-flat overnight
+trough is dominated by noise. It was pulled from Recovery Load. A proper
+settling-time detector (first sustained minimum, or the low-HR period's
+centroid) is the follow-up; the column is kept for it.
+
+---
+
+## SpO₂ bounds
+
+`daily-oxygen-saturation` returns a nightly low and a spread next to the average
+Pulse already stores as `spo2`:
+
+| column | source | meaning |
+|---|---|---|
+| `spo2_min` | `lowerBoundPercentage` | the night's O₂ floor |
+| `spo2_sd` | `standardDeviationPercentage` | overnight O₂ variability |
+
+The view computes `spo2_drop = spo2 − spo2_min` — how far below the night's own
+average the floor sank, so it needs no historical baseline. A large drop or a
+wide `spo2_sd` is a breathing-disturbance / congestion / altitude signal. Not in
+Recovery Load (yet) — surfaced on the Recovery detail as its own line.
+
+---
+
+## non-REM resting HR
+
+`nonRemHeartRateBeatsPerMinute` rides the same HRV payload: a resting HR measured
+in stable non-REM sleep — the RHR analogue of the deep-sleep RMSSD lens, a
+cleaner state than the all-day `rhr`. Stored as `non_rem_hr` with its own
+trailing baseline; the view exposes `non_rem_hr_delta` (up = bad, like
+`rhr_delta`). Display-only for now.
 
 ---
 
@@ -314,6 +377,10 @@ rebuild was for, not exact digits:
   below it
 - strain ignores sleep — a hungover morning in bed is not training load
 - sleep debt rolls: it reaches zero at `need`, and never exceeds its cap
+- Recovery Load: the deep-sleep RMSSD drives the HRV marker once it has a
+  baseline (falls back to the average otherwise); above-baseline deep RMSSD
+  never adds; the fever override is skin-temp only, so a lone breathing blip
+  can't reach "elevated"
 
 If you retune a constant, update the loose bounds in the test to match the new
 *intent*, not the other way round.
@@ -350,3 +417,37 @@ lost hour), and subjective sleepiness adapts while cognitive deficits do not.
 **Strain** — WHOOP day strain is waking cardiovascular + muscular load on a
 non-linear 0–21 scale, with only "a few points" accruing overnight; the
 recovery-scaled recommendation is a target to approach, not a hard number.
+
+**Deep-sleep HRV** — RMSSD is the standard short-term parasympathetic marker, and
+higher overnight RMSSD tracks better self-reported sleep, lower fatigue and lower
+stress in 14-day real-world data
+([daily HRV & wellness, 2025](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC12300306/)).
+Measuring it inside slow-wave sleep — a controlled, low-arousal, stable-breathing
+state — is why Oura reports a ~15.6 % post-drinking HRV drop
+([Oura alcohol data](https://ouraring.com/blog/how-does-alcohol-impact-oura-members/))
+where an all-night average, which folds in REM's sympathetic surges and
+awakenings, is muddier. Pulse's own 42-night probe: deep RMSSD fell ~44 % vs
+baseline on drinking nights against the average's ~23 %.
+
+**HR nadir timing** *(parked — see the section above)* — Oura's Recovery Index is
+literally *hours of sleep after the heart-rate low*, and they say it "is
+beneficial for your RHR to reach its lowest point within the first half of the
+night… If it drops late, your body may have taken longer to settle," and to fix a
+late nadir "avoid late-night meals, caffeine, alcohol, or exercise before bed"
+([Oura Readiness Contributors](https://support.ouraring.com/hc/en-us/articles/360057791533-Readiness-Contributors)).
+Lab work agrees alcohol reshapes the overnight HR trajectory — a steeper early
+drop but a significant rise across the second half, plus suppressed vagal HRV and
+increased sympathetic drive
+([Pietilä et al., JMIR 2018](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5878366/);
+[evening-alcohol dose–response, SLEEP 2021](https://academic.oup.com/sleep/article/44/1/zsaa135/5871424)).
+The direction is sound; the raw-`argmin` implementation is not (first-backfill σ
+≈ 83 min), so it is stored but unused pending a real settling-time detector.
+
+**Overnight SpO₂** — the oxygen-desaturation index correlates strongly with the
+apnea–hypopnea index (r ≈ 0.73–0.94), and inter-night SpO₂ variability rises as
+values leave the normal range
+([ODI vs AHI](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC11576076/);
+[inter-night oximetry variability](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC11196338/)).
+But a real ODI needs ≥ 1 Hz sampling; Google returns only a nightly average /
+low / SD, so `spo2_min` and `spo2_sd` are a coarse "worth a look" flag —
+congestion, altitude, a bad night — not a screen.

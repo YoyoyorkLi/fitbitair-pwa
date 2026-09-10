@@ -227,6 +227,46 @@ def recovery_load_composite():
     no_temp = mx.recovery_load(44, hrv_h, 58, rhr_h, 16.4, rr_h)        # 3 markers, all off
     assert no_temp is not None and mx.load_state(no_temp) == 2, no_temp
 
+    # Fever override is skin-temp ONLY: a lone +1 br/min breathing blip (~1.5 sd
+    # on a tight history) must NOT reach "elevated" by itself. An unrestricted
+    # max(d)/2 flagged real, ordinary nights this way in the backfill.
+    tight_rr = [14.9, 15.0, 15.1, 15.0, 14.95, 15.05, 15.0, 14.9, 15.1, 15.0] * 3
+    rr_blip = mx.recovery_load(60, hrv_h, 53, rhr_h, 16.0, tight_rr)
+    assert mx.load_state(rr_blip) == 0, rr_blip
+
+
+@case
+def recovery_load_deep_lens():
+    """The deep-sleep RMSSD, once it has a baseline, drives the HRV marker in
+    place of the all-night average -- with a wider floor for its noisier signal.
+    """
+    hrv_h = [58, 62, 55, 60, 64, 57, 61, 59, 63, 56] * 3          # avg HRV history
+    deep_h = [40, 44, 38, 42, 46, 39, 43, 41, 45, 37] * 3         # deep RMSSD history
+    rhr_h = [52, 55, 51, 54, 53, 52, 56, 53, 51, 54] * 3
+    rr_h = [15.0, 15.6, 14.7, 15.3, 15.1, 14.9, 15.4, 15.2, 14.8, 15.5] * 3
+
+    # All-night HRV normal for the night (~60 ~ its median), but deep RMSSD is
+    # down (34 vs its ~41 median, ~2 sd) -- the deep lens carries the load up.
+    dv = mx.recovery_load(60, hrv_h, 53, rhr_h, 15.2, rr_h,
+                          hrv_deep=34.0, hrv_deep_hist=deep_h)
+    flat = mx.recovery_load(60, hrv_h, 53, rhr_h, 15.2, rr_h,
+                            hrv_deep=41.0, hrv_deep_hist=deep_h)
+    assert mx.load_state(dv) >= 1, dv
+    assert mx.load_state(flat) == 0, flat
+
+    # Deep RMSSD ABOVE its baseline (a good night) never adds -- bad direction
+    # only, same as every other marker.
+    high = mx.recovery_load(60, hrv_h, 53, rhr_h, 15.2, rr_h,
+                            hrv_deep=60.0, hrv_deep_hist=deep_h)
+    assert high == 0.0, high
+
+    # No deep baseline yet -> silently falls back to the all-night average, so
+    # the number is identical to passing no deep lens at all.
+    fb = mx.recovery_load(48, hrv_h, 53, rhr_h, 15.2, rr_h,
+                          hrv_deep=32.0, hrv_deep_hist=[32, 33])
+    base = mx.recovery_load(48, hrv_h, 53, rhr_h, 15.2, rr_h)
+    assert fb == base, (fb, base)
+
 
 @case
 def naps_credit_debt_not_score():

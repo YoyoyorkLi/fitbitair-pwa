@@ -80,19 +80,20 @@ const S = {
   deep: [], light: [], rem: [], awake: [], inBed: [], need: [], hrvBaseline: [],
   steps: [], drinks: DRINK.slice(), target: [],
   respRate: [], skinTempDelta: [], respRateDelta: [], rhrDelta: [], bodyLoad: [], loadState: [],
+  hrvDeep: [], hrvDeepBaseline: [], hrvDeepPct: [], nonRemHr: [], spo2Min: [],
   z: [[], [], [], [], []],
   bed: [], wake: [],                                       // minutes-of-day, for the newest night's hypnogram
 };
 // Recovery Load port of metrics.recovery_load / _mad_sigma. Same weights,
-// floors and lone-signal override.
+// floors, deep-sleep-RMSSD HRV lens and skin-temp-only fever override.
 const RL_W = { hrv: 0.35, rhr: 0.25, temp: 0.25, rr: 0.15 };
-const RL_FLOOR = { hrv: 3.0, rhr: 2.0, temp: 0.15, rr: 0.5 };
+const RL_FLOOR = { hrv: 3.0, hrv_deep: 5.0, rhr: 2.0, temp: 0.15, rr: 0.5 };
 const madSigma = (v) => {
   if (v.length < 5) return null;
   const m = median(v), mad = median(v.map((x) => Math.abs(x - m)));
   return mad > 1e-9 ? 1.4826 * mad : null;
 };
-function recoveryLoad(hrv, hrvH, rhr, rhrH, rr, rrH, tempDelta, tempSd) {
+function recoveryLoad(hrv, hrvH, rhr, rhrH, rr, rrH, tempDelta, tempSd, hrvDeep, hrvDeepH) {
   const d = {};
   const bad = (val, hist, floor, invert) => {
     const s = madSigma(hist);
@@ -101,7 +102,8 @@ function recoveryLoad(hrv, hrvH, rhr, rhrH, rr, rrH, tempDelta, tempSd) {
     if (Math.abs(val - base) < floor) return 0;
     return clamp(invert ? (base - val) / s : (val - base) / s, 0, 3);
   };
-  const dh = bad(hrv, hrvH, RL_FLOOR.hrv, true);
+  let dh = bad(hrvDeep, hrvDeepH || [], RL_FLOOR.hrv_deep, true);
+  if (dh == null) dh = bad(hrv, hrvH, RL_FLOOR.hrv, true);
   const dr = bad(rhr, rhrH, RL_FLOOR.rhr, false);
   const drr = bad(rr, rrH, RL_FLOOR.rr, false);
   const dt = (tempSd > 1e-9)
@@ -109,9 +111,9 @@ function recoveryLoad(hrv, hrvH, rhr, rhrH, rr, rrH, tempDelta, tempSd) {
   for (const [k, v] of [["hrv", dh], ["rhr", dr], ["temp", dt], ["rr", drr]]) if (v != null) d[k] = v;
   if (!Object.keys(d).length) return null;
   const w = Object.entries(d).reduce((a, [k, v]) => a + RL_W[k] * v, 0);
-  return Math.round(Math.max(w, Math.max(...Object.values(d)) / 2) * 1000) / 1000;
+  return Math.round(Math.max(w, (d.temp ?? 0) / 2) * 1000) / 1000;
 }
-const hrvH = [], rhrH = [], rrH = [];
+const hrvH = [], rhrH = [], rrH = [], hrvDeepH = [];
 const remHist = [], deepHist = [];
 // Stashed in the loop, folded into score/recovery AFTER debt is known (debt is
 // a rolling window -- needs every night's need+asleep first, same as metrics.py)
@@ -127,13 +129,23 @@ for (let i = 0; i < N; i++) {
   // Alcohol: HRV down (steeper per drink), resting HR up, breathing up, skin
   // a touch warmer -- all next morning, all vs baseline.
   const hrv = clamp(baseHrv * (1 - 0.05 * dn) + randn(0, 2.2), 24, 88);
+  // Deep-sleep RMSSD: tracks the all-night average but a touch lower, noisier,
+  // and it takes the alcohol hit harder (the point of the lens).
+  const hrvDeep = clamp(hrv * (0.93 - 0.055 * dn) + randn(0, 3.4), 20, 92);
   const rhr = clamp(baseRhr + 0.85 * dn + randn(0, 0.8), 47, 72);
+  // Non-REM resting HR: measured in a stiller state, so a few bpm below RHR.
+  const nonRemHr = clamp(rhr - rand(3, 8) + 0.4 * dn + randn(0, 0.8), 44, 74);
   const rr = clamp(15.1 + 0.34 * dn + randn(0, 0.42), 12.5, 18.5);
   const tempBase = 33.4 + 0.04 * Math.sin(i / 8);
   const tempNightly = tempBase + (dn ? rand(0.14, 0.5) : randn(0, 0.13));
   const bodyLoad = recoveryLoad(hrv, hrvH.slice(-30), rhr, rhrH.slice(-30),
-    rr, rrH.slice(-30), tempNightly - tempBase, 0.45);
-  hrvH.push(hrv); rhrH.push(rhr); rrH.push(rr);
+    rr, rrH.slice(-30), tempNightly - tempBase, 0.45, hrvDeep, hrvDeepH.slice(-30));
+  hrvH.push(hrv); rhrH.push(rhr); rrH.push(rr); hrvDeepH.push(hrvDeep);
+  // SpO2 floor: nightly average ~95-96, a low a few points under it (wider on a
+  // drinking night).
+  const spo2Avg = clamp(95.7 - 0.35 * dn + randn(0, 0.5), 92, 98);
+  const spo2Min = r1(clamp(spo2Avg - rand(1.6, 3.2) - 0.5 * dn, 86, spo2Avg));
+  const hrvDeepBase = hrvDeepH.length > 5 ? median(hrvDeepH.slice(-30, -1)) : null;
 
   // Need: flat 7h baseline, plus a little the night after a hard day.
   const need = NEED_MIN + (hard ? ri(8, 26) : 0);
@@ -207,6 +219,11 @@ for (let i = 0; i < N; i++) {
   S.rhrDelta.push(rhrH.length > 5 ? r1(rhr - median(rhrH.slice(-30, -1))) : null);
   S.bodyLoad.push(bodyLoad);
   S.loadState.push(bodyLoad == null ? null : bodyLoad < 0.5 ? 0 : bodyLoad < 1.0 ? 1 : 2);
+  S.hrvDeep.push(r1(hrvDeep));
+  S.hrvDeepBaseline.push(hrvDeepBase == null ? null : r1(hrvDeepBase));
+  S.hrvDeepPct.push(hrvDeepBase == null ? null : Math.round((hrvDeep / hrvDeepBase) * 100));
+  S.nonRemHr.push(Math.round(nonRemHr));
+  S.spo2Min.push(spo2Min);
   for (let k = 0; k < 5; k++) S.z[k].push(z[k]);
   S.bed.push(bed); S.wake.push(wake);
 }
@@ -460,6 +477,10 @@ const out = {
   z: S.z, target: S.target,
   bodyLoad: S.bodyLoad, loadState: S.loadState, skinTempDelta: S.skinTempDelta,
   respRate: S.respRate, respRateDelta: S.respRateDelta, rhrDelta: S.rhrDelta,
+  // migration 002 -- the fields the PWA actually renders. non_rem_hr_delta /
+  // spo2_drop / spo2_sd are in Supabase for later but nothing reads them.
+  hrvDeep: S.hrvDeep, hrvDeepBaseline: S.hrvDeepBaseline, hrvDeepPct: S.hrvDeepPct,
+  nonRemHr: S.nonRemHr, spo2Min: S.spo2Min,
   steps: S.steps, drinks: S.drinks, hrmax: 192,
   curve, hypno, today,
   // per-night detail so the calendars aren't a single lit cell

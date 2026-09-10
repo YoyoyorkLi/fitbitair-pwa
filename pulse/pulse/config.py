@@ -169,10 +169,12 @@ DATA_TYPES = {
 # _num() happened to land on the right field by matching "rate"/"percent", but
 # only because of dict ordering. Naming them explicitly removes the luck.
 #
-#   HRV also ships deepSleepRootMeanSquareOfSuccessiveDifferencesMilliseconds
-#   (true RMSSD, scoped to deep sleep) alongside the average, plus `entropy`.
-#   The deep-sleep RMSSD is plausibly the better alcohol marker -- measured in a
-#   controlled state -- and is worth capturing as a second series later.
+#   Only the ONE value field per type is named here -- normalize_daily() reads a
+#   single number. Types that carry more (the HRV payload also ships
+#   deepSleepRootMeanSquareOfSuccessiveDifferencesMilliseconds and
+#   nonRemHeartRateBeatsPerMinute; oxygen-saturation ships lowerBoundPercentage
+#   and standardDeviationPercentage) are pulled straight off the raw points in
+#   push.build_rows(), the same way skin temperature is.
 DAILY_FIELDS = {
     "daily-resting-heart-rate":     ("dailyRestingHeartRate", "beatsPerMinute"),
     "daily-heart-rate-variability": ("dailyHeartRateVariability",

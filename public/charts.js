@@ -824,32 +824,59 @@ export function doseResponse(W, D) {
   const h = 258, x0 = padL(W) + 6, x1 = W - padR(W) - (narrow(W) ? 4 : 16), y0 = 16, y1 = 196;
   const { pts } = pctPoints(D);
   if (!pts.length) return svg(W, 92, txt(W / 2, 50, "no HRV recorded yet", { anchor: "middle" }), "no data");
+
+  // Deterministic per-render jitter, so drinks (integers) don't stack into one
+  // opaque column. Seeded, so the layout is stable across renders.
+  const newJit = () => { let s = 7; return () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return (s / 0x7fffffff - 0.5) * 0.34; }; };
+
+  // Deep-sleep RMSSD as a second, hollow series where it has its own baseline --
+  // no fit line (too few drinking nights, and its baseline is still settling),
+  // just the points, so you can see it drop harder than the average on a
+  // drinking night. Built first so its % values widen the y-domain too. The
+  // jitter is baked in here off a stream advanced once per night that is in the
+  // PRIMARY series -- so a night present in both lands its two dots on the same
+  // x even when earlier nights had no deep baseline.
+  const deepPts = [];
+  if (Array.isArray(D.hrvDeep) && Array.isArray(D.hrvDeepBaseline)) {
+    const dj = newJit();
+    for (let i = 0; i < D.dates.length; i++) {
+      if (!ok(D.hrv[i])) continue;            // same nights as the primary series
+      const j = dj();
+      if (!ok(D.hrvDeep[i]) || !ok(D.hrvDeepBaseline[i]) || D.hrvDeepBaseline[i] <= 0) continue;
+      deepPts.push([D.drinks[i], (D.hrvDeep[i] / D.hrvDeepBaseline[i]) * 100, D.dates[i], D.hrvDeep[i], j]);
+    }
+  }
+  const allV = [...pts.map((p) => p[1]), ...deepPts.map((p) => p[1])];
   const maxD = Math.max(6, ...pts.map((p) => p[0]));
-  const lo = Math.min(55, ...pts.map((p) => p[1])) - 5, hi = Math.max(...pts.map((p) => p[1])) + 5;
+  const lo = Math.min(55, ...allV) - 5, hi = Math.max(...allV) + 5;
   const X = (d) => x0 + (d / maxD) * (x1 - x0), Y = (v) => y1 - ((v - lo) / (hi - lo)) * (y1 - y0);
   const N = pts.length;
   const sx = pts.reduce((a, p) => a + p[0], 0), sy = pts.reduce((a, p) => a + p[1], 0);
   const sxy = pts.reduce((a, p) => a + p[0] * p[1], 0), sxx = pts.reduce((a, p) => a + p[0] * p[0], 0);
   const m = (N * sxy - sx * sy) / (N * sxx - sx * sx || 1), b = (sy - m * sx) / N;
 
-  // Drinks are integers, so sober nights would stack into one opaque column
-  // that hides how many nights are in it. Deterministic jitter, seeded so the
-  // layout is stable across renders.
-  let dots = "", seed = 7;
-  const jit = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return (seed / 0x7fffffff - 0.5) * 0.34; };
+  let dots = "", jit = newJit();
   for (const [d, v, date, raw] of pts) {
     dots += `<circle cx="${X(d + jit()).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="${d ? 5.5 : 4}"
       fill="${d ? col("drink") : col("muted")}" opacity="${d ? 0.92 : 0.42}" stroke="${col("panel")}" stroke-width="1.5"
       data-tip="${esc(`${date}|${d ? d + " drinks" : "sober"} → HRV ${raw}ms, ${Math.round(v)}% of baseline`)}"/>`;
   }
+  let deepDots = "";
+  for (const [d, v, date, raw, j] of deepPts) {
+    deepDots += `<circle cx="${X(d + j).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="${d ? 4.5 : 3.2}"
+      fill="none" stroke="${col("accent")}" stroke-width="1.6" opacity="${d ? 0.9 : 0.4}"
+      data-tip="${esc(`${date}|deep-sleep HRV ${Math.round(raw)}ms, ${Math.round(v)}% of baseline`)}"/>`;
+  }
+
   const p = grid(x0, x1, [y0, y1]) +
     `<line x1="${x0}" y1="${Y(100).toFixed(1)}" x2="${x1}" y2="${Y(100).toFixed(1)}" stroke="${col("muted")}" stroke-width="1.25" stroke-dasharray="5 4" opacity=".8"/>
      ${txt(x1, Y(100) - 8, "sober average", { size: narrow(W) ? 9.5 : 11 })}
      <line x1="${X(0)}" y1="${Y(b).toFixed(1)}" x2="${X(maxD)}" y2="${Y(m * maxD + b).toFixed(1)}" stroke="${col("drink")}" stroke-width="2" opacity=".75"
        data-tip="${esc(`fit|${m.toFixed(1)}% of baseline HRV per drink`)}"/>
-     ${dots}${axis(x0, x1, y1)}` +
+     ${dots}${deepDots}${axis(x0, x1, y1)}` +
     Array.from({ length: maxD + 1 }, (_, d) => txt(X(d), y1 + 18, d, { anchor: "middle" })).join("") +
     [lo, 100, hi].map((v) => txt(x0 - 9, Y(v) + 4, Math.round(v) + "%")).join("") +
+    (deepPts.length ? txt(x1, y0 + 8, "○ deep-sleep HRV", { size: narrow(W) ? 9 : 10, anchor: "end", fill: "accent" }) : "") +
     txt((x0 + x1) / 2, h - 8, "standard drinks that night", { size: 11, anchor: "middle" });
   return svg(W, h, p, "Drinks against next-morning HRV as a percentage of baseline");
 }

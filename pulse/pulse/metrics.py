@@ -779,23 +779,31 @@ def _mad_sigma(vals):
 # most (the specific autonomic-stress marker), breathing least (wrist RR is the
 # least accurate of the four). See METRICS.md.
 _RL_W = {"hrv": 0.35, "rhr": 0.25, "temp": 0.25, "rr": 0.15}
-_RL_FLOOR = {"hrv": 3.0, "rhr": 2.0, "temp": 0.15, "rr": 0.5}
+_RL_FLOOR = {"hrv": 3.0, "hrv_deep": 5.0, "rhr": 2.0, "temp": 0.15, "rr": 0.5}
 
 
 def recovery_load(hrv, hrv_hist, rhr, rhr_hist, rr, rr_hist,
-                  temp_delta=None, temp_sd=None):
+                  temp_delta=None, temp_sd=None,
+                  hrv_deep=None, hrv_deep_hist=None):
     """One overnight number: is your body working harder than usual to recover?
 
     Each of the 4 autonomic markers vs YOUR OWN 30-night normal, counting only
     moves in the bad direction (HRV down, RHR/RR/skin-temp up), floored so a
     tiny wobble is nothing and clamped to 3 so one wild night can't pin it.
-    Weighted mean over the markers that have data; then max() with the largest
-    single deviation / 2, so one ~2-sigma signal (skin temp = fever) reaches
-    the top band on its own.
+    Weighted mean over the markers that have data; then max() with the skin-temp
+    deviation / 2, so a ~2-sigma temperature rise (fever) reaches the top band
+    on its own -- no other marker gets that, a lone HRV or breathing wobble is
+    just noise.
+
+    HRV marker: the deep-sleep RMSSD (`hrv_deep`, measured in a controlled
+    state -- probed as the sharper alcohol signal, ~-44% vs the average's -23%
+    on drinking nights) is used when it has a baseline, with a wider floor since
+    its sober-night spread runs ~1.5x the average's. Falls back to the all-night
+    average (`hrv`) otherwise.
 
     Skin temp uses Google's own baseline+SD (`temp_delta` = nightly - baseline,
-    `temp_sd` = relativeNightlyStddev30dCelsius); the other three use a trailing
-    median + MAD computed here from *_hist.
+    `temp_sd` = relativeNightlyStddev30dCelsius); the other markers use a
+    trailing median + MAD computed here from *_hist.
 
     Returns ~0..3, or None if no marker has enough history. Bands live in the
     reader: < 0.5 settled, < 1.0 elevated, else high.
@@ -814,7 +822,9 @@ def recovery_load(hrv, hrv_hist, rhr, rhr_hist, rr, rr_hist,
         z = (base - val) / sigma if invert else (val - base) / sigma
         return float(np.clip(z, 0.0, 3.0))
 
-    dh = bad(hrv, hrv_hist, _RL_FLOOR["hrv"], invert=True)
+    dh = bad(hrv_deep, hrv_deep_hist or [], _RL_FLOOR["hrv_deep"], invert=True)
+    if dh is None:                          # no deep-RMSSD baseline yet
+        dh = bad(hrv, hrv_hist, _RL_FLOOR["hrv"], invert=True)
     dr = bad(rhr, rhr_hist, _RL_FLOOR["rhr"])
     drr = bad(rr, rr_hist, _RL_FLOOR["rr"])
     if _isnum(temp_delta) and _isnum(temp_sd) and temp_sd > 1e-9:
@@ -834,7 +844,12 @@ def recovery_load(hrv, hrv_hist, rhr, rhr_hist, rr, rr_hist,
     # skin-temp reading the watch didn't get is not evidence of anything, so it
     # should not dilute a real HRV signal, nor should a normal one.
     weighted = sum(_RL_W[k] * v for k, v in d.items())
-    return round(max(weighted, max(d.values()) / 2.0), 3)
+    # Fever override: skin temp is specific and reliable enough (Google's own
+    # per-person baseline + SD) that a ~2-sigma rise alone means "high". No
+    # other marker gets this -- a lone HRV drop or, especially, a lone wrist-RR
+    # wobble is just noise, and on real data an unrestricted version of this
+    # flagged perfectly ordinary nights off a +1 br/min breathing blip.
+    return round(max(weighted, d.get("temp", 0.0) / 2.0), 3)
 
 
 def load_state(body_load):
