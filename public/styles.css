@@ -249,6 +249,27 @@ a{color:var(--accent)}
 .drinkadd input{width:150px}
 .drinkadd button.primary{width:auto;padding:13px 28px;flex:0 0 auto}
 
+/* Drinks tab: "Log a drink now" — the in-app tap. Amber to tie it to drinks;
+   the calendar below is for backfilling past nights. */
+.lognow{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;
+  background:var(--drink);color:#0B0E14;border:0;border-radius:8px;
+  padding:16px;font-weight:600;font-size:15.5px;letter-spacing:-.01em;
+  -webkit-tap-highlight-color:transparent}
+.lognow:active{filter:brightness(.92)}
+.lognow .plus{font-size:19px;font-weight:500;line-height:1}
+.nowempty{margin:11px 0 22px !important;text-align:center}
+.nowlist{margin:13px 0 24px}
+.nowhd{margin:0 0 8px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.nowhd b{color:var(--text)}
+.nowrow{display:flex;align-items:center;gap:12px;background:var(--panel2);
+  border-radius:5px;padding:9px 10px 9px 13px;margin-bottom:6px;font-size:14px}
+.nowrow .nown{color:var(--dim);font-variant-numeric:tabular-nums;min-width:14px}
+.nowrow .nowt{color:var(--text);font-weight:500;flex:1;font-variant-numeric:tabular-nums}
+.nowdel{background:none;border:1px solid var(--grid);color:var(--muted);border-radius:6px;
+  width:32px;height:32px;font-size:16px;line-height:1;flex:none;
+  -webkit-tap-highlight-color:transparent}
+.nowdel:active{color:var(--warn);border-color:var(--warn)}
+
 /* #workout-day's per-workout cards: collapsed to time/duration/calories,
    expanding on tap to the heart-rate chart and zone breakdown. The summary
    button IS the card's header -- no separate h2, since the chevron and the

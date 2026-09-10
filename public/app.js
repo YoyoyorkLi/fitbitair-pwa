@@ -610,6 +610,9 @@ function normalize(D) {
 
   for (const k of ["inBed", "need", "hrvBaseline", "bodyLoad", "loadState",
                    "skinTempDelta", "respRate", "respRateDelta", "rhrDelta"]) D[k] ??= [];
+  // Not indexed by D.dates -- a flat list of the current drinking-night's
+  // drinks, so it is not touched by trimInProgressNight below.
+  D.tonight ??= [];
   // Derive loadState from bodyLoad if a fixture carried only the raw score.
   if (Array.isArray(D.bodyLoad) && (!Array.isArray(D.loadState) || !D.loadState.length)) {
     D.loadState = D.bodyLoad.map(loadStateOf);
@@ -723,10 +726,13 @@ async function loadLive() {
   // tomorrow (see trimInProgressNight() in normalize()).
   //
   // One day earlier than the first row: a drink at 1am on dates[0] is on the
-  // civil day before dates[0], so a gte on dates[0] would miss it.
-  if (D.drinks.some(Boolean)) {
+  // civil day before dates[0], so a gte on dates[0] would miss it. Runs
+  // unconditionally now, not just when a synced night already has drinks --
+  // D.tonight (below) needs it so the "Log a drink now" button can show and
+  // undo tonight's drinks before tonight's row exists.
+  {
     const from = new Date(`${D.dates[0]}T12:00:00Z`);
-    from.setUTCDate(from.getUTCDate() - 1);
+    from.setUTCDate(from.getUTCDate() - 2);
     const { data: rows } = await sb
       .from("drinks").select("id,logged_at,std_drinks")
       .gte("logged_at", from.toISOString()).order("logged_at");
@@ -742,6 +748,15 @@ async function loadLive() {
     })));
     D.firstDrink = D.drinkRows.map((day) => (day.length ? day[0].logged_at : null));
     D.lastDrink = D.drinkRows.map((day) => (day.length ? day[day.length - 1].logged_at : null));
+
+    // Tonight = drinks in the CURRENT 4am drinking-night (drinkNightOf), which
+    // is what the tap endpoint counts. Kept separate from D.drinkRows because
+    // that array is indexed by D.dates and today isn't in it until the sync
+    // catches up.
+    const tn = drinkNightOf(new Date(), tz);
+    D.tonight = (rows || [])
+      .filter((r) => drinkNightOf(new Date(r.logged_at), tz) === tn)
+      .map((r) => ({ id: r.id, logged_at: new Date(r.logged_at), std_drinks: r.std_drinks }));
   }
 
   // The dead man's check the schema was built around and nothing ever read.
@@ -1209,12 +1224,13 @@ const drinkRow = (r) => `<div class="drinkrow">
     <button type="button" class="drdel" data-del-drink="${r.id}" aria-label="Delete this drink">×</button>
   </div>`;
 
-// Defaults the add-form's time to now, but only on the night that IS
-// tonight -- pre-filling "now" on a night from three weeks ago would read
-// as today's time attached to the wrong date until you noticed and fixed it.
+// Defaults the add-form's time to now ONLY when the opened day is the actual
+// calendar today (in PULSE_TZ) -- not merely the newest loaded night, which is
+// yesterday whenever the sleep sync is lagging. "Now" on yesterday's cell was
+// silently misdating drinks by a day. Any other day defaults to 9pm.
 function defaultDrinkTime(D, i) {
-  const isTonight = i === D.dates.length - 1;
-  const at = isTonight ? new Date() : new Date(`${D.dates[i]}T21:00:00`);
+  const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: tz });
+  const at = D.dates[i] === todayISO ? new Date() : new Date(`${D.dates[i]}T21:00:00`);
   return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
 }
 
@@ -1320,6 +1336,74 @@ async function deleteDrink(i, id) {
   render();
 }
 
+// "Log a drink now" -- the in-app equivalent of an NFC tap: current instant,
+// current 4am night, straight to the drinks table. Independent of the
+// calendar, which stays for backfilling forgotten drinks on past days. Works
+// even when tonight has no night_summary row yet (the drink just doesn't show
+// on the Day tab / calendar until the sync catches up -- same as a tap).
+async function addDrinkNow() {
+  const D = DATA, at = new Date();
+  if (isDemo) {
+    (D.tonight ||= []).push({ id: `demo-${Date.now()}`, logged_at: at, std_drinks: MANUAL_DRINK_STD });
+    D.tonight.sort((a, b) => a.logged_at - b.logged_at);
+    return render();
+  }
+  const { error } = await sb.from("drinks").insert({
+    logged_at: at.toISOString(), night: drinkNightOf(at, tz),
+    kind: MANUAL_DRINK_KIND, std_drinks: MANUAL_DRINK_STD, source: "manual",
+  });
+  if (error) return alert(`Could not log drink: ${error.message}`);
+  const live = await loadLive();
+  if (live) DATA = normalize(live);
+  render();
+}
+
+async function deleteDrinkById(id) {
+  const D = DATA;
+  if (isDemo || String(id).startsWith("demo-")) {
+    D.tonight = (D.tonight || []).filter((r) => r.id !== id);
+    return render();
+  }
+  const { error } = await sb.from("drinks").delete().eq("id", id);
+  if (error) return alert(`Could not delete drink: ${error.message}`);
+  const live = await loadLive();
+  if (live) DATA = normalize(live);
+  render();
+}
+
+// Re-pull just the current drinking-night's drinks and re-render the Drinks
+// tab if they changed. Called when the tab is opened and on foreground, so a
+// drink logged on the NFC sticker while the app was elsewhere shows up (and is
+// deletable) without waiting for a full sync. Tag and in-app drinks are the
+// same rows -- source is "nfc" vs "manual" -- so this list carries both.
+let refreshingTonight = false;
+async function refreshTonight() {
+  if (isDemo || !sb || !DATA || refreshingTonight) return;
+  refreshingTonight = true;
+  try {
+    const from = new Date();
+    from.setUTCDate(from.getUTCDate() - 2);
+    const { data: rows, error } = await sb
+      .from("drinks").select("id,logged_at,std_drinks")
+      .gte("logged_at", from.toISOString()).order("logged_at");
+    if (error) return;
+    const tn = drinkNightOf(new Date(), tz);
+    const next = (rows || [])
+      .filter((r) => drinkNightOf(new Date(r.logged_at), tz) === tn)
+      .map((r) => ({ id: r.id, logged_at: new Date(r.logged_at), std_drinks: r.std_drinks }));
+    const before = (DATA.tonight || []).map((r) => r.id).join();
+    if (next.map((r) => r.id).join() !== before) {
+      DATA.tonight = next;
+      renderDrinksTab(DATA);
+    }
+  } finally {
+    refreshingTonight = false;
+  }
+}
+addEventListener("visibilitychange", () => {
+  if (!document.hidden && currentTab() === "drinks") refreshTonight();
+});
+
 $("dash").addEventListener("click", (e) => {
   if (e.target.closest?.("[data-wo-toggle]")) {
     showWorkouts = !showWorkouts;
@@ -1344,6 +1428,9 @@ $("dash").addEventListener("click", (e) => {
   if (cell) return openWorkoutDay(Number(cell.dataset.dayIdx));
   if (e.target.closest?.("#cal-prev")) return stepCalMonth(-1);
   if (e.target.closest?.("#cal-next")) return stepCalMonth(1);
+  if (e.target.closest?.("[data-log-now]")) return addDrinkNow();
+  const delNow = e.target.closest?.("[data-del-now]");
+  if (delNow) return deleteDrinkById(delNow.dataset.delNow);
   const drCell = e.target.closest?.(".calcell[data-drinks-day-idx]");
   if (drCell) return openDrinksDay(Number(drCell.dataset.drinksDayIdx));
   if (e.target.closest?.("#drcal-prev")) return stepDrinksCalMonth(-1);
@@ -1711,7 +1798,23 @@ function renderDrinksTab(D) {
       : `<div class="calcell out">${day}</div>`;
   }
 
+  // "Log a drink now" + tonight's running list. Independent of the calendar
+  // below (and of D.dates) so it works before tonight has synced.
+  const tn = (D.tonight || []).slice().sort((a, b) => a.logged_at - b.logged_at);
+  const time12 = (d) => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  const nowBlock = `
+    <button type="button" class="lognow" data-log-now>
+      <span class="plus">+</span> Log drink now
+    </button>
+    ${tn.length ? `<div class="nowlist">
+      <p class="nowhd">Tonight — <b>${tn.length}</b></p>
+      ${tn.map((r, k) => `<div class="nowrow"><span class="nown">${k + 1}</span>
+        <span class="nowt">${time12(r.logged_at)}</span>
+        <button type="button" class="nowdel" data-del-now="${r.id}" aria-label="Delete drink ${k + 1}">×</button></div>`).join("")}
+    </div>` : `<p class="note nowempty">Or tap a past night below to add a forgotten drink.</p>`}`;
+
   $("drinks").innerHTML = `
+    ${nowBlock}
     <div class="calnav">
       <button class="nav" id="drcal-prev" type="button" aria-label="Previous month">‹</button>
       <p class="calmonth">${monthLabel}</p>
@@ -1779,6 +1882,7 @@ for (const btn of document.querySelectorAll(".tab")) {
     // "which date" control on Workouts.
     $("daynav").hidden = btn.dataset.tab !== "today";
     tip.hidden = true;
+    if (btn.dataset.tab === "drinks") refreshTonight();
   });
 }
 
