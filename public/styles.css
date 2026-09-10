@@ -251,12 +251,13 @@ a{color:var(--accent)}
 
 /* Drinks tab: "Log a drink now" — the in-app tap. Amber to tie it to drinks;
    the calendar below is for backfilling past nights. */
-.lognow{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;
-  background:var(--drink);color:#0B0E14;border:0;border-radius:8px;
-  padding:16px;margin-bottom:16px;font-weight:600;font-size:15.5px;letter-spacing:-.01em;
-  -webkit-tap-highlight-color:transparent}
+.lognow{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
+  appearance:none;-webkit-appearance:none;
+  background:var(--drink);color:#0B0E14;border:0;border-radius:6px;
+  padding:11px 16px;margin-bottom:16px;font-weight:600;font-size:14.5px;line-height:1.2;
+  letter-spacing:-.01em;-webkit-tap-highlight-color:transparent}
 .lognow:active{filter:brightness(.92)}
-.lognow .plus{font-size:19px;font-weight:500;line-height:1}
+.lognow .plus{font-size:17px;font-weight:500;line-height:1;margin-top:-1px}
 .nowlist{margin:0 0 22px}
 .nowhd{margin:0 0 8px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 .nowhd b{color:var(--text)}
