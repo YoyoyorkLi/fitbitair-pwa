@@ -257,17 +257,42 @@ def _daily_workouts(con):
     return out
 
 
+def _hist(series, upto, days=None):
+    """The trailing values in the baseline window, excluding the night itself."""
+    days = days or cfg.BASELINE_DAYS
+    lo = upto - pd.Timedelta(days=days)
+    return [v for d, v in series.items()
+            if lo <= pd.Timestamp(d) < upto and v is not None and not pd.isna(v)]
+
+
 def _baseline(series, upto, days=None):
     """Trailing median over the baseline window, excluding the night itself.
 
     Median rather than mean: one 2am flight or one fever should not move the
     line every drinking night is measured against.
     """
-    days = days or cfg.BASELINE_DAYS
-    lo = upto - pd.Timedelta(days=days)
-    hist = [v for d, v in series.items()
-            if lo <= pd.Timestamp(d) < upto and v is not None and not pd.isna(v)]
+    hist = _hist(series, upto, days)
     return float(np.median(hist)) if len(hist) >= 3 else None
+
+
+def _skin_temp(con):
+    """Overnight skin temperature: {night -> (nightly_c, baseline_c, sd_c)}.
+
+    Multi-field (nightly / baseline / 30-day SD), so pulled straight off the
+    raw points like deep_rmssd rather than through normalize_daily. Google
+    already personalises the baseline and SD from the intra-night samples we
+    don't get, so recovery_load uses theirs directly for this marker.
+    """
+    out = {}
+    for p in ingest.load("daily-sleep-temperature-derivations", con):
+        b = p.get("dailySleepTemperatureDerivations") or {}
+        d = mx._civil_date(b.get("date"))
+        nt = mx._f(b.get("nightlyTemperatureCelsius"))
+        bt = mx._f(b.get("baselineTemperatureCelsius"))
+        sd = mx._f(b.get("relativeNightlyStddev30dCelsius"))
+        if d and nt is not None and bt is not None:
+            out[pd.Timestamp(d)] = (nt, bt, sd)
+    return out
 
 
 def build_rows(con=None):
@@ -292,9 +317,10 @@ def build_rows(con=None):
     rr = dict(zip(D["rr"]["date"], D["rr"][rr_f])) if not D["rr"].empty else {}
     hrv_map, rhr_map = D["hrv_map"], D["rhr_map"]
 
-    # The deep-sleep RMSSD rides in the same payload as the average but is not
-    # in DAILY_FIELDS, so pull it straight off the raw points.
-    deep_rmssd = {}
+    # Two raw-points pulls that don't go through normalize_daily: the deep-sleep
+    # RMSSD (rides in the HRV payload, not in DAILY_FIELDS) and the skin-temp
+    # triple (nightly / baseline / SD). `con` is already closed if we own it.
+    deep_rmssd, skin_temp = {}, {}
     con2 = ingest.db() if own else con
     try:
         for p in ingest.load("daily-heart-rate-variability", con2):
@@ -303,6 +329,7 @@ def build_rows(con=None):
             v = mx._f(b.get("deepSleepRootMeanSquareOfSuccessiveDifferencesMilliseconds"))
             if d and v is not None:
                 deep_rmssd[pd.Timestamp(d)] = v
+        skin_temp = _skin_temp(con2)
     finally:
         if own:
             con2.close()
@@ -317,6 +344,15 @@ def build_rows(con=None):
         night_obj = by_night.get(night)
         start, end = r.get("start"), r.get("end")
         nadir_bpm, nadir_at = _nadir(hr, start, end)
+
+        st = skin_temp.get(night)                       # (nightly, baseline, sd) | None
+        body_load = mx.recovery_load(
+            hrv_map.get(night), _hist(hrv_map, night),
+            rhr_map.get(night), _hist(rhr_map, night),
+            rr.get(night), _hist(rr, night),
+            (st[0] - st[1]) if st else None,
+            st[2] if st else None)
+
         rows.append({
             "night": night.strftime("%Y-%m-%d"),
             "hrv_rmssd": _clean(hrv_map.get(night)),
@@ -325,7 +361,11 @@ def build_rows(con=None):
             "rhr": _clean(rhr_map.get(night)),
             "rhr_baseline": _clean(_baseline(rhr_map, night)),
             "resp_rate": _clean(rr.get(night)),
+            "resp_rate_baseline": _clean(_baseline(rr, night)),
             "spo2": _clean(spo2.get(night)),
+            "skin_temp_c": _clean(st[0] if st else None),
+            "skin_temp_baseline_c": _clean(st[1] if st else None),
+            "body_load": _clean(body_load),
             "steps": _clean(steps.get(night.date())),
             "workouts": workouts.get(night.date()) or None,
             "sleep_start": _clean(start),

@@ -79,9 +79,39 @@ const S = {
   strain: [], recovery: [], score: [], asleep: [], debt: [], rhr: [], hrv: [],
   deep: [], light: [], rem: [], awake: [], inBed: [], need: [], hrvBaseline: [],
   steps: [], drinks: DRINK.slice(), target: [],
+  respRate: [], skinTempDelta: [], respRateDelta: [], rhrDelta: [], bodyLoad: [], loadState: [],
   z: [[], [], [], [], []],
   bed: [], wake: [],                                       // minutes-of-day, for the newest night's hypnogram
 };
+// Recovery Load port of metrics.recovery_load / _mad_sigma. Same weights,
+// floors and lone-signal override.
+const RL_W = { hrv: 0.35, rhr: 0.25, temp: 0.25, rr: 0.15 };
+const RL_FLOOR = { hrv: 3.0, rhr: 2.0, temp: 0.15, rr: 0.5 };
+const madSigma = (v) => {
+  if (v.length < 5) return null;
+  const m = median(v), mad = median(v.map((x) => Math.abs(x - m)));
+  return mad > 1e-9 ? 1.4826 * mad : null;
+};
+function recoveryLoad(hrv, hrvH, rhr, rhrH, rr, rrH, tempDelta, tempSd) {
+  const d = {};
+  const bad = (val, hist, floor, invert) => {
+    const s = madSigma(hist);
+    if (val == null || s == null) return null;
+    const base = median(hist);
+    if (Math.abs(val - base) < floor) return 0;
+    return clamp(invert ? (base - val) / s : (val - base) / s, 0, 3);
+  };
+  const dh = bad(hrv, hrvH, RL_FLOOR.hrv, true);
+  const dr = bad(rhr, rhrH, RL_FLOOR.rhr, false);
+  const drr = bad(rr, rrH, RL_FLOOR.rr, false);
+  const dt = (tempSd > 1e-9)
+    ? (Math.abs(tempDelta) < RL_FLOOR.temp ? 0 : clamp(tempDelta / tempSd, 0, 3)) : null;
+  for (const [k, v] of [["hrv", dh], ["rhr", dr], ["temp", dt], ["rr", drr]]) if (v != null) d[k] = v;
+  if (!Object.keys(d).length) return null;
+  const w = Object.entries(d).reduce((a, [k, v]) => a + RL_W[k] * v, 0);
+  return Math.round(Math.max(w, Math.max(...Object.values(d)) / 2) * 1000) / 1000;
+}
+const hrvH = [], rhrH = [], rrH = [];
 const remHist = [], deepHist = [];
 // Stashed in the loop, folded into score/recovery AFTER debt is known (debt is
 // a rolling window -- needs every night's need+asleep first, same as metrics.py)
@@ -94,9 +124,16 @@ for (let i = 0; i < N; i++) {
   const baseHrv = 60 - 26 * (fitness - 0.5) + 4 * Math.sin(i / 6) + randn(0, 2.2);
   const baseRhr = 52.5 + 12 * (fitness - 0.3) + randn(0, 0.9);
 
-  // Alcohol: HRV down (steeper per drink), resting HR up, both next morning.
+  // Alcohol: HRV down (steeper per drink), resting HR up, breathing up, skin
+  // a touch warmer -- all next morning, all vs baseline.
   const hrv = clamp(baseHrv * (1 - 0.05 * dn) + randn(0, 2.2), 24, 88);
   const rhr = clamp(baseRhr + 0.85 * dn + randn(0, 0.8), 47, 72);
+  const rr = clamp(15.1 + 0.34 * dn + randn(0, 0.42), 12.5, 18.5);
+  const tempBase = 33.4 + 0.04 * Math.sin(i / 8);
+  const tempNightly = tempBase + (dn ? rand(0.14, 0.5) : randn(0, 0.13));
+  const bodyLoad = recoveryLoad(hrv, hrvH.slice(-30), rhr, rhrH.slice(-30),
+    rr, rrH.slice(-30), tempNightly - tempBase, 0.45);
+  hrvH.push(hrv); rhrH.push(rhr); rrH.push(rr);
 
   // Need: flat 7h baseline, plus a little the night after a hard day.
   const need = NEED_MIN + (hard ? ri(8, 26) : 0);
@@ -164,6 +201,12 @@ for (let i = 0; i < N; i++) {
   S.deep.push(deep); S.light.push(light); S.rem.push(rem); S.awake.push(awake);
   S.inBed.push(inBed); S.need.push(Math.round(need)); S.hrvBaseline.push(r1(baseHrv));
   S.steps.push(steps);
+  S.respRate.push(r1(rr));
+  S.skinTempDelta.push(bodyLoad == null ? null : r1(tempNightly - tempBase));
+  S.respRateDelta.push(rrH.length > 5 ? r1(rr - median(rrH.slice(-30, -1))) : null);
+  S.rhrDelta.push(rhrH.length > 5 ? r1(rhr - median(rhrH.slice(-30, -1))) : null);
+  S.bodyLoad.push(bodyLoad);
+  S.loadState.push(bodyLoad == null ? null : bodyLoad < 0.5 ? 0 : bodyLoad < 1.0 ? 1 : 2);
   for (let k = 0; k < 5; k++) S.z[k].push(z[k]);
   S.bed.push(bed); S.wake.push(wake);
 }
@@ -415,6 +458,8 @@ const out = {
   debt: S.debt, rhr: S.rhr, hrv: S.hrv, need: S.need,
   deep: S.deep, light: S.light, rem: S.rem, awake: S.awake,
   z: S.z, target: S.target,
+  bodyLoad: S.bodyLoad, loadState: S.loadState, skinTempDelta: S.skinTempDelta,
+  respRate: S.respRate, respRateDelta: S.respRateDelta, rhrDelta: S.rhrDelta,
   steps: S.steps, drinks: S.drinks, hrmax: 192,
   curve, hypno, today,
   // per-night detail so the calendars aren't a single lit cell

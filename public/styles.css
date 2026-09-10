@@ -86,6 +86,24 @@ a{color:var(--accent)}
 .pips{display:flex;gap:4px}
 .pips i{width:7px;height:18px;border-radius:2px;background:var(--drink);display:block}
 
+/* Recovery Load status bar -- one line under the dials, colour = state.
+   A button (taps into the Recovery detail); reset the UA styling. */
+.loadbar{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  background:var(--panel);border:1px solid var(--grid);border-left:2px solid var(--muted);
+  border-radius:0 6px 6px 0;padding:11px 15px;margin-bottom:14px;font:inherit;font-size:13.5px;
+  color:var(--muted);cursor:pointer;-webkit-tap-highlight-color:transparent}
+.loadbar .lb-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+.loadbar .lb-txt b{color:var(--text);font-weight:600}
+.loadbar.l1{border-left-color:var(--awake)}
+.loadbar.l1 .lb-dot{background:var(--awake)}
+.loadbar.l2{border-left-color:var(--warn)}
+.loadbar.l2 .lb-dot{background:var(--warn)}
+.loadbar.l0{border-left-color:var(--good)}
+.loadbar.l0 .lb-dot{background:var(--good)}
+.loadcard.l1{border-left:2px solid var(--awake)}
+.loadcard.l2{border-left:2px solid var(--warn)}
+.loadcard.l0{border-left:2px solid var(--good)}
+
 .card{background:var(--panel);border:1px solid var(--grid);border-radius:6px;padding:18px;margin-bottom:14px}
 /* Flex, not the toggles floating in an absolutely-positioned corner: an
    absolute chip has no height as far as the box below it (.readrow, with

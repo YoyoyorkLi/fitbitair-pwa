@@ -198,18 +198,77 @@ that tile the day), not a load figure.
 
 ## Strain ceiling
 
-`strain_ceiling(recovery)` — a single number to stay **under** today, scaled to
-recovery. Not a band to fill: undershooting on a low-recovery day is the correct
-call, so there is no lower bound.
+`strain_ceiling(recovery, load_state)` — a single number to stay **under** today,
+scaled to recovery. Not a band to fill: undershooting on a low-recovery day is
+the correct call, so there is no lower bound.
 
 ```
-ceiling = round( 6.0 + 0.09 · recovery , 1 )
-        # recovery 100 → 15.0    50 → 10.5    25 → 8.3
+ceiling = 6.0 + 0.09 · recovery              # recovery 100 → 15.0   50 → 10.5   25 → 8.3
+ceiling = min(ceiling, cap[load_state])      # cap = {1: 11.0, 2: 8.0}, from Recovery Load
+ceiling = round(ceiling, 1)
 ```
 
-Recomputed in the browser (`app.js`) rather than stored — a pure function of
-recovery, so a stored copy could only drift. `render.compute()` also puts it on
-`m["target"]` for the standalone dashboard.
+The load cap exists because `recovery` reads only HRV / RHR / sleep — an early
+illness that shows in skin temp + breathing but not yet in HRV would otherwise
+leave the ceiling high. An **elevated** Recovery Load caps it at 11, a **high**
+one at 8.
+
+Recomputed in the browser (`app.js` `ceilingWithLoad` + `normalize()`) rather
+than stored — a pure function of recovery and load state, so a stored copy could
+only drift.
+
+---
+
+## Recovery Load
+
+`recovery_load(...)` — one overnight number: **is your body working harder than
+usual to recover?** Fighting a bug, clearing alcohol, recovering from a hard day,
+stressed, bad sleep environment. Stored as `body_load`; the reader (`app.js`,
+`load_state()`) bands it **settled / elevated / high** at 0.5 and 1.0.
+
+### Inputs — 4 overnight markers, each vs *your own* normal
+
+| marker | value | baseline · spread | bad direction |
+|---|---|---|---|
+| HRV | `averageHeartRateVariabilityMilliseconds` | trailing 30-night median · 1.4826·MAD | ↓ down |
+| resting HR | `daily_resting_heart_rate.beatsPerMinute` | trailing median · 1.4826·MAD | ↑ up |
+| respiratory rate | `daily_respiratory_rate.breathsPerMinute` | trailing median · 1.4826·MAD | ↑ up |
+| skin temp | `nightlyTemperatureCelsius` | **Google's** `baselineTemperatureCelsius` · `relativeNightlyStddev30dCelsius` | ↑ up |
+
+Skin temp uses Google's own baseline + SD (computed from the intra-night samples
+we don't get); the other three use a robust median + MAD from `push._hist`.
+
+### The math
+
+```
+per marker m:
+    σ_m = 1.4826 · MAD(hist_m)               # None with < 5 clean nights
+    z_m = (value − median) / σ_m             # temp: delta / google_sd
+    d_m = clip( bad-direction part of z_m , 0, 3 )
+    d_m = 0  if |value − baseline| < floor_m     # floor: hrv 3ms, rhr 2bpm, temp 0.15°C, rr 0.5
+
+weights w = { hrv 0.35, rhr 0.25, temp 0.25, rr 0.15 }   # sum = 1
+body_load = Σ w_m · d_m                       # present-but-normal (d_m = 0) contributes nothing,
+                                              #   same as a missing marker — a reading the watch
+                                              #   didn't get is not evidence of anything
+body_load = max( body_load , max(d_m) / 2 )   # lone-signal override: one ~2σ marker (skin temp
+                                              #   ≈ fever) reaches "high" on its own
+```
+
+Returns `None` when no marker has ≥ 5 nights of history. Weights: HRV highest (the
+specific autonomic-stress marker), breathing lowest (wrist RR is the least
+accurate). **One marker off is noise; two or three together is real.**
+
+### It doesn't tell you *why*
+
+Illness, alcohol, stress, a hot room all look similar. Paired with the drink log
+the PWA reconciles: *"3 drinks — expected"* vs *"nothing logged — check in."*
+
+### Degrades gracefully
+
+Skin temp only started syncing after the data type was added, so most history
+computes from 3 markers. A night with no main sleep, or the first ~5 nights, get
+`body_load = null`.
 
 ---
 

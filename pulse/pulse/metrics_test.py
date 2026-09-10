@@ -194,6 +194,38 @@ def strain_ceiling_scales_with_recovery():
     assert mx.strain_ceiling(25) < mx.strain_ceiling(60) < mx.strain_ceiling(95)
     assert 7 <= mx.strain_ceiling(30) <= 10
     assert 13 <= mx.strain_ceiling(100) <= 17
+    # an elevated / high recovery load hard-caps the ceiling
+    assert mx.strain_ceiling(95, 1) == 11.0
+    assert mx.strain_ceiling(95, 2) == 8.0
+    assert mx.strain_ceiling(20, 1) == mx.strain_ceiling(20)   # already under the cap
+
+
+@case
+def recovery_load_composite():
+    hrv_h = [58, 62, 55, 60, 64, 57, 61, 59, 63, 56] * 3
+    rhr_h = [52, 55, 51, 54, 53, 52, 56, 53, 51, 54] * 3
+    rr_h = [15.0, 15.6, 14.7, 15.3, 15.1, 14.9, 15.4, 15.2, 14.8, 15.5] * 3
+
+    calm = mx.recovery_load(60, hrv_h, 53, rhr_h, 15.2, rr_h,
+                            temp_delta=0.06, temp_sd=0.45)
+    assert calm is not None and mx.load_state(calm) == 0, calm
+
+    fever = mx.recovery_load(60, hrv_h, 53, rhr_h, 15.2, rr_h,
+                             temp_delta=0.95, temp_sd=0.45)          # ~ +2 SD, alone
+    assert mx.load_state(fever) == 2, fever
+
+    rough = mx.recovery_load(55, hrv_h, 55, rhr_h, 15.4, rr_h,       # each mildly off
+                             temp_delta=0.22, temp_sd=0.45)
+    assert mx.load_state(rough) == 1, rough
+
+    wobble = mx.recovery_load(60, hrv_h, 54.5, rhr_h, 15.2, rr_h,    # RHR +1.5 < 2 floor
+                              temp_delta=0.05, temp_sd=0.45)
+    assert mx.load_state(wobble) == 0, wobble
+
+    assert mx.recovery_load(60, [60, 61], 53, [53], 15, [15]) is None   # no baseline
+
+    no_temp = mx.recovery_load(44, hrv_h, 58, rhr_h, 16.4, rr_h)        # 3 markers, all off
+    assert no_temp is not None and mx.load_state(no_temp) == 2, no_temp
 
 
 @case

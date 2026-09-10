@@ -121,7 +121,21 @@ create table public.nights (
   rhr             numeric,
   rhr_baseline    numeric,
   resp_rate       numeric,
+  resp_rate_baseline numeric,
   spo2            numeric,   -- averagePercentage
+
+  -- Overnight skin-temperature (daily-sleep-temperature-derivations): the
+  -- absolute nightly mean and Google's own rolling baseline. The delta feeds
+  -- recovery_load() as its illness-specific axis (fever / alcohol run warm).
+  skin_temp_c            numeric,
+  skin_temp_baseline_c   numeric,
+
+  -- Recovery Load: one overnight number, is the body working harder than
+  -- usual to recover -- HRV / RHR / breathing / skin temp vs personal normal,
+  -- bad-direction only. metrics.recovery_load(). ~0 settled, 0.5 elevated,
+  -- 1.0+ high; the PWA reads the bands, and an elevated/high value also caps
+  -- the strain ceiling.
+  body_load       numeric,
 
   -- Steps arrive as per-minute intervals with a string `count`; the sync sums
   -- them into a daily total.
@@ -288,7 +302,18 @@ select
        as min_to_nadir,
 
   n.hr_curve,
-  n.workouts
+  n.workouts,
+
+  -- Recovery Load (see sql/migrations/001_recovery_load.sql -- an existing DB
+  -- gets these by running that; this block keeps a fresh install identical).
+  -- Appended at the END so `create or replace view` in the migration matches.
+  n.skin_temp_c, n.skin_temp_baseline_c,
+  case when n.skin_temp_c is not null and n.skin_temp_baseline_c is not null
+       then round((n.skin_temp_c - n.skin_temp_baseline_c)::numeric, 2) end as skin_temp_delta,
+  n.resp_rate_baseline,
+  case when n.resp_rate is not null and n.resp_rate_baseline is not null
+       then round((n.resp_rate - n.resp_rate_baseline)::numeric, 2) end as resp_rate_delta,
+  n.body_load
 from public.nights n
 full outer join (
   select night,

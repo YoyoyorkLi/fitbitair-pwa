@@ -743,15 +743,105 @@ def recovery(hrv, hrv_hist, rhr, rhr_hist, sleep_perf):
     return int(round(100 * (0.55 * hrv_c + 0.25 * rhr_c + 0.20 * slp_c)))
 
 
-def strain_ceiling(rec):
+def strain_ceiling(rec, load_state=0):
     """A single strain number to stay UNDER today, scaled to recovery -- not a
     band to fill. Undershooting on a low-recovery day is the correct call, not
     a miss, so there is no lower bound: on a hungover morning the honest
     message is "take it easy", not "you have 8 more points to earn".
 
         rec 100 -> ~15.0     rec 50 -> ~10.5     rec 25 -> ~8.3
+
+    `load_state` (0/1/2 from recovery_load) hard-caps it: recovery uses only
+    HRV/RHR/sleep, so an early illness that shows in skin temp + breathing but
+    not yet in HRV would leave the ceiling high. An elevated/high Recovery Load
+    forces it down regardless.
     """
-    return round(6.0 + 0.09 * float(rec), 1)
+    ceil = 6.0 + 0.09 * float(rec)
+    cap = cfg.STRAIN_CEILING_LOAD_CAP.get(int(load_state))
+    if cap is not None:
+        ceil = min(ceil, cap)
+    return round(ceil, 1)
+
+
+# ------------------------------------------------------------ recovery load
+def _mad_sigma(vals):
+    """1.4826 x median-absolute-deviation -- a robust sigma that pairs with a
+    median baseline. None with < 5 clean points or a degenerate spread."""
+    v = [x for x in vals if _isnum(x)]
+    if len(v) < 5:
+        return None
+    med = float(np.median(v))
+    mad = float(np.median([abs(x - med) for x in v]))
+    return 1.4826 * mad if mad > 1e-9 else None
+
+
+# Recovery Load weights and per-marker "min move to count" floors. HRV weighs
+# most (the specific autonomic-stress marker), breathing least (wrist RR is the
+# least accurate of the four). See METRICS.md.
+_RL_W = {"hrv": 0.35, "rhr": 0.25, "temp": 0.25, "rr": 0.15}
+_RL_FLOOR = {"hrv": 3.0, "rhr": 2.0, "temp": 0.15, "rr": 0.5}
+
+
+def recovery_load(hrv, hrv_hist, rhr, rhr_hist, rr, rr_hist,
+                  temp_delta=None, temp_sd=None):
+    """One overnight number: is your body working harder than usual to recover?
+
+    Each of the 4 autonomic markers vs YOUR OWN 30-night normal, counting only
+    moves in the bad direction (HRV down, RHR/RR/skin-temp up), floored so a
+    tiny wobble is nothing and clamped to 3 so one wild night can't pin it.
+    Weighted mean over the markers that have data; then max() with the largest
+    single deviation / 2, so one ~2-sigma signal (skin temp = fever) reaches
+    the top band on its own.
+
+    Skin temp uses Google's own baseline+SD (`temp_delta` = nightly - baseline,
+    `temp_sd` = relativeNightlyStddev30dCelsius); the other three use a trailing
+    median + MAD computed here from *_hist.
+
+    Returns ~0..3, or None if no marker has enough history. Bands live in the
+    reader: < 0.5 settled, < 1.0 elevated, else high.
+    """
+    d = {}
+
+    def bad(val, hist, floor, invert=False):
+        if not _isnum(val):
+            return None
+        sigma = _mad_sigma(hist)
+        if sigma is None:
+            return None
+        base = float(np.median([h for h in hist if _isnum(h)]))
+        if abs(val - base) < floor:
+            return 0.0
+        z = (base - val) / sigma if invert else (val - base) / sigma
+        return float(np.clip(z, 0.0, 3.0))
+
+    dh = bad(hrv, hrv_hist, _RL_FLOOR["hrv"], invert=True)
+    dr = bad(rhr, rhr_hist, _RL_FLOOR["rhr"])
+    drr = bad(rr, rr_hist, _RL_FLOOR["rr"])
+    if _isnum(temp_delta) and _isnum(temp_sd) and temp_sd > 1e-9:
+        dt = 0.0 if abs(temp_delta) < _RL_FLOOR["temp"] \
+            else float(np.clip(temp_delta / temp_sd, 0.0, 3.0))
+    else:
+        dt = None
+
+    for k, v in (("hrv", dh), ("rhr", dr), ("temp", dt), ("rr", drr)):
+        if v is not None:
+            d[k] = v
+    if not d:
+        return None
+
+    # Weights sum to 1, so a marker that is present-but-normal (v == 0)
+    # contributes nothing -- the same as a missing one. That is deliberate: a
+    # skin-temp reading the watch didn't get is not evidence of anything, so it
+    # should not dilute a real HRV signal, nor should a normal one.
+    weighted = sum(_RL_W[k] * v for k, v in d.items())
+    return round(max(weighted, max(d.values()) / 2.0), 3)
+
+
+def load_state(body_load):
+    """< 0.5 settled (0), < 1.0 elevated (1), else high (2). None -> None."""
+    if not _isnum(body_load):
+        return None
+    return 0 if body_load < 0.5 else 1 if body_load < 1.0 else 2
 
 
 def consistency(nights, n=14):

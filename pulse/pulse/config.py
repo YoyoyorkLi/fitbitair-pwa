@@ -76,6 +76,13 @@ SLEEP_DEBT_SURPLUS_CREDIT = 0.5          # a night over NEED pays down at half r
 SLEEP_DEBT_TARGET_FRAC = 0.35
 SLEEP_DEBT_TARGET_CAP  = 90              # minutes; +1.5h over NEED at most
 
+# ---- recovery load -> strain ceiling --------------------------------------
+# An elevated / high overnight Recovery Load (recovery_load()) hard-caps the
+# strain ceiling here, because `recovery` itself only reads HRV/RHR/sleep --
+# an early illness visible in skin temp + breathing but not yet in HRV would
+# otherwise leave the ceiling high. Keyed by load_state 1 (elevated) / 2 (high).
+STRAIN_CEILING_LOAD_CAP = {1: 11.0, 2: 8.0}
+
 # The API returns every point as a UTC instant. Without a zone, a Chicago
 # evening (UTC-5) lands on the following UTC day and every evening workout is
 # filed under tomorrow. None = auto-detect from the OS.

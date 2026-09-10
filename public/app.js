@@ -26,6 +26,17 @@ const show = (id) => {
 };
 const { hm, ok, col, ZONE } = ch;
 
+// Recovery Load: 0/1/2 = settled / elevated / high (bands 0.5, 1.0 -- mirror
+// metrics.load_state). The strain ceiling mirrors metrics.strain_ceiling +
+// STRAIN_CEILING_LOAD_CAP: an elevated/high load hard-caps it because the
+// recovery score can't see skin temp or breathing.
+const LOAD_WORD = ["settled", "elevated", "high"];
+const loadStateOf = (v) => (!ok(v) ? NaN : v < 0.5 ? 0 : v < 1.0 ? 1 : 2);
+const ceilingWithLoad = (rec, st) => {
+  const c = 6 + 0.09 * rec;
+  return st === 2 ? Math.min(c, 8) : st === 1 ? Math.min(c, 11) : c;
+};
+
 // Module-level, not local to render(): renderTrendCharts() (the range-toggle
 // handler) rebuilds part of the Trends tab independently of a full render(),
 // and needs the same markup helpers -- one definition, not a second copy that
@@ -36,6 +47,37 @@ const kpi = (c, cap, sub, detail) => detail
   ? `<button type="button" class="kpi" data-detail="${detail}">${c}<p class="cap">${cap}</p><p class="sub">${sub}</p></button>`
   : `<div class="kpi">${c}<p class="cap">${cap}</p><p class="sub">${sub}</p></div>`;
 const stat = (v, k, c) => `<div class="stat"><div class="v"${c ? ` style="color:${c}"` : ""}>${v}</div><div class="k">${k}</div></div>`;
+
+// Which overnight markers moved against baseline, as short phrases. Uses the
+// same "past a floor" gates as metrics.recovery_load so the text matches what
+// actually drove the number.
+function loadMarkers(t) {
+  const b = [];
+  if (ok(t.skinTempDelta) && Math.abs(t.skinTempDelta) >= 0.15)
+    b.push(`skin temp ${t.skinTempDelta > 0 ? "+" : ""}${t.skinTempDelta.toFixed(1)}°C`);
+  if (ok(t.hrv) && ok(t.hrvBaseline) && t.hrv < t.hrvBaseline * 0.92)
+    b.push(`HRV ${Math.round((t.hrv / t.hrvBaseline) * 100)}% of normal`);
+  if (ok(t.rhrDelta) && t.rhrDelta >= 2) b.push(`resting HR +${Math.round(t.rhrDelta)}`);
+  if (ok(t.respRateDelta) && t.respRateDelta >= 0.5) b.push(`breathing +${t.respRateDelta.toFixed(1)}`);
+  return b;
+}
+
+// The Recovery Load status bar under the three dials -- one line every day the
+// signal exists, colour = state, expands with the contributing markers when
+// elevated/high and reconciles against the drink log. Taps into the Recovery
+// detail. Empty when there's no body_load yet (early nights, pre-migration).
+function loadBar(t) {
+  if (!ok(t.bodyLoad) || !Number.isInteger(t.loadState)) return "";
+  const s = t.loadState;
+  const bits = loadMarkers(t);
+  const why = s === 0 ? "" : bits.length ? ` — ${bits.join(" · ")}` : "";
+  const drink = t.drinks
+    ? (s === 0 ? ` · ${t.drinks} drink${t.drinks > 1 ? "s" : ""}, no lasting hit`
+      : ` · ${t.drinks} drink${t.drinks > 1 ? "s" : ""} — expected`)
+    : (s > 0 ? " · nothing logged" : "");
+  return `<button type="button" class="loadbar l${s}" data-detail="recovery">
+    <span class="lb-dot"></span><span class="lb-txt">Recovery load: <b>${LOAD_WORD[s]}</b>${why}${drink}</span></button>`;
+}
 // Scrubbable charts get a readout row between the title and the chart: the
 // values land THERE rather than in a bubble under your thumb. On a phone the
 // floating tooltip was the whole problem -- the finger covers the number it
@@ -566,10 +608,17 @@ function normalize(D) {
     ? D.workout_nights.map((v) => v || [])
     : only(D.workout_list || []).map((v) => v || []);
 
-  // Older demo.json fixtures carried target_lo/target_hi; derive the single
-  // ceiling from recovery if only those (or neither) are present.
-  D.target ??= (D.recovery || []).map((v) => (ok(v) ? +(6 + 0.09 * v).toFixed(1) : NaN));
-  for (const k of ["inBed", "need", "hrvBaseline"]) D[k] ??= [];
+  for (const k of ["inBed", "need", "hrvBaseline", "bodyLoad", "loadState",
+                   "skinTempDelta", "respRate", "respRateDelta", "rhrDelta"]) D[k] ??= [];
+  // Derive loadState from bodyLoad if a fixture carried only the raw score.
+  if (Array.isArray(D.bodyLoad) && (!Array.isArray(D.loadState) || !D.loadState.length)) {
+    D.loadState = D.bodyLoad.map(loadStateOf);
+  }
+  // Strain ceiling is a pure function of recovery + load state, so always
+  // (re)derive it here -- loadLive supplies its own, an old fixture may carry
+  // a stale or load-blind one.
+  D.target = (D.recovery || []).map((v, i) =>
+    (ok(v) ? +ceilingWithLoad(v, D.loadState[i]).toFixed(1) : NaN));
   return trimInProgressNight(D);
 }
 
@@ -593,6 +642,7 @@ function trimInProgressNight(D) {
   for (const k of ["dates", "hrv", "rhr", "rem", "deep", "light", "awake", "asleep",
                    "inBed", "need", "hrvBaseline", "debt", "score", "recovery", "strain",
                    "steps", "drinks", "target", "curves", "hypnos",
+                   "bodyLoad", "loadState", "skinTempDelta", "respRate", "respRateDelta", "rhrDelta",
                    "workouts", "drinkTimes", "drinkRows", "firstDrink", "lastDrink"]) {
     if (Array.isArray(D[k])) D[k].pop();
   }
@@ -623,13 +673,11 @@ async function loadLive() {
   const z = [0, 1, 2, 3, 4].map((i) =>
     data.map((r) => (Array.isArray(r.zone_min) ? Number(r.zone_min[i]) || 0 : 0)));
 
-  // Strain ceiling: a single number to stay UNDER today, scaled to recovery
-  // (mirrors metrics.strain_ceiling). Recomputed here rather than stored --
-  // it is a pure function of recovery, so a stored copy could only drift.
-  // Undershooting it on a low-recovery day is the right call, not a miss, so
-  // there is no lower bound.
+  // Recovery Load: an overnight anomaly flag (metrics.recovery_load, stored).
+  // 0/1/2 = settled / elevated / high; bands are 0.5 and 1.0. loadState and the
+  // strain ceiling derived from it are (re)computed in normalize().
   const rec = num("recovery");
-  const target = rec.map((v) => (ok(v) ? +(6 + 0.09 * v).toFixed(1) : NaN));
+  const bodyLoad = num("body_load");
 
   const D = {
     dates: data.map((r) => r.night),
@@ -641,7 +689,10 @@ async function loadLive() {
     debt: num("sleep_debt_min"), score: num("sleep_score"),
     recovery: rec, strain: num("strain"), steps: num("steps"),
     drinks: data.map((r) => Number(r.drinks || 0)),
-    z, target,
+    z,
+    bodyLoad, loadState: bodyLoad.map(loadStateOf),
+    skinTempDelta: num("skin_temp_delta"), respRate: num("resp_rate"),
+    respRateDelta: num("resp_rate_delta"), rhrDelta: num("rhr_delta"),
     hrmax: Number(last.hrmax) || 192,
     // Per night, not just the newest one: hr_curve and stages are columns on
     // every row of night_summary and are already in this response (select "*"),
@@ -766,6 +817,9 @@ function dayView(D, i) {
     scoreTarget: ok(need) ? Math.round(need + Math.min(90, 0.35 * debtIn)) : NaN,
     deep: at(D.deep), light: at(D.light), rem: at(D.rem), awake: at(D.awake),
     drinks: Number(D.drinks[i] || 0), steps: at(D.steps),
+    bodyLoad: at(D.bodyLoad),
+    loadState: Array.isArray(D.loadState) && Number.isInteger(D.loadState[i]) ? D.loadState[i] : NaN,
+    skinTempDelta: at(D.skinTempDelta), respRateDelta: at(D.respRateDelta), rhrDelta: at(D.rhrDelta),
   };
 }
 // The newest night keeps whatever richer object the source handed us (demo.json
@@ -1040,10 +1094,11 @@ function renderDay() {
 
   $("today").innerHTML = `
     <div class="kpis">
-      ${kpi(ch.gauge(t.strain, 21, ok(t.target) && t.strain > t.target ? col("warn") : col("strain"), "Day Strain", `Day Strain ${t.strain} of 21|waking heart-rate load — sleep doesn't count${ok(t.target) ? `|stay under ${t.target} today` : ""}`), "Day Strain", ok(t.target) ? `under ${t.target}` : "", "strain")}
+      ${kpi(ch.gauge(t.strain, 21, ok(t.target) && t.strain > t.target ? col("warn") : col("strain"), "Day Strain", `Day Strain ${t.strain} of 21|waking heart-rate load — sleep doesn't count${ok(t.target) ? `|stay under ${t.target} today${t.loadState > 0 ? " (capped — recovery load)" : ""}` : ""}`), "Day Strain", ok(t.target) ? `under ${t.target}` : "", "strain")}
       ${kpi(ch.ring(t.recovery, recCol, "Recovery", `Recovery ${t.recovery}|55% HRV · 25% resting HR · 20% sleep`), "Recovery", `${t.recovery >= 67 ? "well recovered" : t.recovery >= 34 ? "moderate" : "low"}${t.drinks ? ` · ${t.drinks} drink${t.drinks > 1 ? "s" : ""}` : ""}`, "recovery")}
       ${kpi(ch.ring(t.score, ok(t.score) && t.score >= 80 ? col("good") : col("awake"), "Sleep Score", ok(t.score) ? `Sleep Score ${t.score}|how well + how settled, scaled to how long you slept vs what you needed — more when you're carrying sleep debt` : "No sleep recorded|this night has not been scored"), "Sleep Score", ok(t.asleep) ? hm(t.asleep) : "not yet", "sleep")}
     </div>
+    ${loadBar(t)}
     ${strip}
     <div class="card"><div class="stats">
       ${stat(ok(t.hrv) ? t.hrv : "—", "HRV ms", recCol)}${stat(ok(t.rhr) ? t.rhr : "—", "RHR bpm")}
@@ -1281,7 +1336,7 @@ $("dash").addEventListener("click", (e) => {
     try { localStorage.setItem(SL_KEY, showSleep ? "1" : "0"); } catch { /* private mode */ }
     return renderDay();
   }
-  const b = e.target.closest?.(".kpi[data-detail]");
+  const b = e.target.closest?.(".kpi[data-detail], .loadbar[data-detail]");
   if (b) return openDetail(b.dataset.detail);
   const w = e.target.closest?.(".workrow[data-workout-day]");
   if (w) return openWorkoutDay(Number(w.dataset.workoutDay));
@@ -1498,13 +1553,28 @@ function renderDetailBody(kind) {
     const trendDays = win(D, 30, 14);
     const hrvBaseUsed = ok(t.hrvBaseline) ? t.hrvBaseline : ch.slope(D).base;
     const hrvPct = Math.round((t.hrv / hrvBaseUsed) * 100);
+    const hasTemp = Array.isArray(D.skinTempDelta) && D.skinTempDelta.some(ok);
+    const hasRR = Array.isArray(D.respRate) && D.respRate.some(ok);
+    const bits = loadMarkers(t);
+    const loadCard = ok(t.bodyLoad) && Number.isInteger(t.loadState)
+      ? `<div class="card loadcard l${t.loadState}">
+          <h2>Recovery load — ${LOAD_WORD[t.loadState]}</h2>
+          <p class="note" style="margin:0">${t.loadState === 0
+            ? "Your overnight heart rate, HRV, breathing and skin temperature all sat within their normal range."
+            : `${bits.length ? bits.join(" · ") : "One or more overnight signals ran outside your 30-night normal"}. ${
+                t.drinks ? `The expected hit from ${t.drinks} drink${t.drinks > 1 ? "s" : ""}.`
+                         : "Illness, stress, a late meal, or a missed tap?"} It also caps today's strain ceiling.`}</p></div>`
+      : "";
     return `
       <div class="detail-dial">${ch.ring(t.recovery, recCol, "Recovery", `Recovery ${t.recovery}|55% HRV · 25% resting HR · 20% sleep`)}</div>
       <p class="note center">55% HRV · 25% resting heart rate · 20% sleep score, each against your
         rolling baseline${ok(hrvPct) ? ` — HRV is <b>${hrvPct}%</b> of yours` : ""}.</p>
+      ${loadCard}
       ${card(`Recovery — ${trendDays} days`, ch.sparkline(W, D, D.recovery, recCol, trendDays, ""))}
       ${card(`HRV (rMSSD) — ${trendDays} days`, ch.sparkline(W, D, D.hrv, col("accent"), trendDays, "ms"))}
       ${card(`Resting heart rate — ${trendDays} days`, ch.sparkline(W, D, D.rhr, col("warn"), trendDays, "bpm"))}
+      ${hasTemp ? card(`Skin temperature vs baseline — ${trendDays} nights`, ch.sparkline(W, D, D.skinTempDelta, col("warn"), trendDays, "°C")) : ""}
+      ${hasRR ? card(`Respiratory rate — ${trendDays} nights`, ch.sparkline(W, D, D.respRate, col("accent"), trendDays, "br/min")) : ""}
       ${card(`Sleep Score — ${trendDays} nights`, ch.sparkline(W, D, D.score, col("rem"), trendDays, ""))}`;
   }
 
