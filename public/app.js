@@ -1839,7 +1839,7 @@ function renderTrends(D) {
   // paragraph. Losing it with the prose would have been the one real casualty.
   $("trends").innerHTML = `
     <div class="card"><h2>Drinks vs next-morning HRV</h2>
-      <p class="readout live"><b>${perDrink.toFixed(1)}% of baseline HRV per drink</b><span>${nights} drinking night${nights === 1 ? "" : "s"}</span></p>
+      <p class="readout live"><b>${perDrink.toFixed(1)}% of baseline HRV per drink</b><span> · ${nights} drinking night${nights === 1 ? "" : "s"}</span></p>
       <div class="chartbox">${ch.doseResponse(W, D)}</div></div>
     <div class="range" role="tablist" aria-label="Trend window">
       ${RANGE_PRESETS.map((n) => `<button class="rbtn" role="tab" aria-selected="false" data-days="${n}" type="button">${n}d</button>`).join("")}
