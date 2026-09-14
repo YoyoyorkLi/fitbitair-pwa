@@ -59,17 +59,23 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
 
-def _post(body):
+def _post(body, retryable=True):
+    """retryable=False for the authorization_code grant (login()): the code is
+    single-use, so replaying it after a response is lost in transit -- Google
+    processed it, we just never saw the reply -- gets invalid_grant on the
+    retry instead of the token that was actually issued. The refresh_token
+    grant has no such hazard; a refresh token survives being reused."""
     req = urllib.request.Request(
         TOKEN_ENDPOINT, data=urllib.parse.urlencode(body).encode(),
         headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST")
+    attempts = 4 if retryable else 1
     # Every sync run hits this once before touching any data -- unlike
     # ingest.fetch(), it never retried a transient blip, so one bad DNS
     # lookup or a 502 from Google's token endpoint failed the whole run.
-    # Same backoff as ingest.fetch(): retry a 5xx or network error a few
-    # times, but not a 4xx (invalid_grant etc. -- retrying that just burns
-    # four attempts on something that will never succeed).
-    for attempt in range(4):
+    # Same backoff as ingest.fetch(): retry a 429 or 5xx or network error a
+    # few times, but not a 4xx like invalid_grant (retrying that just burns
+    # attempts on something that will never succeed).
+    for attempt in range(attempts):
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
                 return json.loads(r.read())
@@ -78,13 +84,13 @@ def _post(body):
                 detail = json.loads(e.read() or b"{}")
             except Exception:
                 detail = {}
-            if e.code >= 500 and attempt < 3:
+            if (e.code == 429 or e.code >= 500) and attempt < attempts - 1:
                 time.sleep(1.5 * (attempt + 1))
                 continue
             raise RuntimeError(f"token endpoint {e.code}: {detail.get('error')} "
                                f"{detail.get('error_description', '')}") from None
         except urllib.error.URLError as e:
-            if attempt < 3:
+            if attempt < attempts - 1:
                 time.sleep(1.0 * (attempt + 1))
                 continue
             raise RuntimeError(f"cannot reach Google: {e.reason}") from None
@@ -148,7 +154,7 @@ def login(timeout=300):
 
     tok = _post({"grant_type": "authorization_code", "code": _Handler.code,
                  "redirect_uri": cfg.REDIRECT_URI, "client_id": cfg.CLIENT_ID,
-                 "client_secret": cfg.CLIENT_SECRET})
+                 "client_secret": cfg.CLIENT_SECRET}, retryable=False)
     if "refresh_token" not in tok:
         raise SystemExit("No refresh token returned. Revoke Pulse at "
                          "myaccount.google.com/permissions and run login again.")

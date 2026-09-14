@@ -26,6 +26,30 @@ const GH = "https://api.github.com";
 const UA = "pulse-pwa";                 // GitHub rejects requests without one
 const WORKFLOW = process.env.GH_WORKFLOW || "sync.yml";
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Every fetch below used to fail outright on the first blip -- the same gap
+// the Python sync side had until a real incident showed it up. One helper
+// here (this file, unlike the Python one, only has one place for it) rather
+// than three copies: retry a thrown network error or a 429/5xx response,
+// leave a definitive 401/403/404/etc. alone since retrying that never helps.
+async function fetchRetry(url, opts = {}, attempts = 4) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, opts);
+    } catch (err) {
+      if (attempt < attempts - 1) { await sleep(1000 * (attempt + 1)); continue; }
+      throw err;
+    }
+    if ((res.status === 429 || res.status >= 500) && attempt < attempts - 1) {
+      await sleep(1500 * (attempt + 1));
+      continue;
+    }
+    return res;
+  }
+}
+
 // Vercel injects the git owner/slug for repo-linked projects, so the common
 // case needs no configuration. GH_REPO overrides for anything else.
 function repo() {
@@ -53,7 +77,7 @@ async function callerIsSignedIn(req) {
   const anon = process.env.SUPABASE_ANON_KEY || "";
   if (!base || !anon) throw new Error("missing SUPABASE_URL or SUPABASE_ANON_KEY");
 
-  const r = await fetch(`${base}/auth/v1/user`, {
+  const r = await fetchRetry(`${base}/auth/v1/user`, {
     headers: { apikey: anon, Authorization: `Bearer ${token}` },
   });
   return r.ok;
@@ -69,7 +93,7 @@ const ghHeaders = (token) => ({
 /** Is a run already going? Dispatching a second is pure waste -- both would
  *  fetch the same 30 days and race to upsert identical rows. */
 async function runInFlight(slug, token) {
-  const r = await fetch(`${GH}/repos/${slug}/actions/workflows/${WORKFLOW}/runs?per_page=5`, {
+  const r = await fetchRetry(`${GH}/repos/${slug}/actions/workflows/${WORKFLOW}/runs?per_page=5`, {
     headers: ghHeaders(token),
   });
   if (!r.ok) return null;                       // not fatal; fall through to dispatch
@@ -116,7 +140,7 @@ export default async function handler(req, res) {
       return json(res, 409, { error: "a sync is already running", run: "in_progress" });
     }
 
-    const r = await fetch(`${GH}/repos/${slug}/actions/workflows/${WORKFLOW}/dispatches`, {
+    const r = await fetchRetry(`${GH}/repos/${slug}/actions/workflows/${WORKFLOW}/dispatches`, {
       method: "POST",
       headers: { ...ghHeaders(token), "Content-Type": "application/json" },
       body: JSON.stringify({ ref: process.env.GH_REF || "main" }),

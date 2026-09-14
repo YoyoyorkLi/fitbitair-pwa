@@ -993,6 +993,10 @@ async function checkSynced() {
 
     stopWatching();
     const wasOn = DATA?.dates?.[dayIdx];
+    // workoutDayIdx/drinksDayIdx are raw indices too, independent of dayIdx --
+    // same exposure to a sync shifting the window out from under them.
+    const wasOnWorkout = workoutDayIdx != null ? DATA?.dates?.[workoutDayIdx] : null;
+    const wasOnDrinks = drinksDayIdx != null ? DATA?.dates?.[drinksDayIdx] : null;
     const live = await loadLive();
     if (live) {
       DATA = normalize(live);
@@ -1000,6 +1004,18 @@ async function checkSynced() {
       // row and shift every index under you.
       const i = wasOn ? DATA.dates.indexOf(wasOn) : -1;
       dayIdx = i >= 0 ? i : DATA.dates.length - 1;
+      // Same remap for the two detail sheets. A date that aged out of the
+      // 45-night window (only possible if it was already the oldest one
+      // loaded) closes the sheet instead of silently relabelling it onto
+      // whichever night now sits at that index.
+      if (workoutDayIdx != null) {
+        const wi = wasOnWorkout ? DATA.dates.indexOf(wasOnWorkout) : -1;
+        if (wi >= 0) workoutDayIdx = wi; else closeWorkoutDay();
+      }
+      if (drinksDayIdx != null) {
+        const di = wasOnDrinks ? DATA.dates.indexOf(wasOnDrinks) : -1;
+        if (di >= 0) drinksDayIdx = di; else closeDrinksDay();
+      }
       render();
     }
     setSyncUi(s.last_ok === false ? { error: "sync failed" } : null);

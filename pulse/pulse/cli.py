@@ -146,9 +146,12 @@ def main(argv=None):
             elif arg:                 # optional: sync N days first, then push
                 print(f"syncing {arg} days first ...")
                 ig.sync(days=int(arg), verbose=True)
-            ps.push()
         except RuntimeError as e:
             sys.exit(f"\n\nSync failed:\n  {e}")
+        try:
+            ps.push()
+        except RuntimeError as e:
+            sys.exit(f"\n\nPush failed:\n  {e}")
 
     elif cmd == "doctor":
         from . import ingest, metrics
