@@ -667,8 +667,17 @@ function trimInProgressNight(D) {
 // Two queries, not one: night_summary aggregates drinks to a count, but the
 // heart-rate chart needs each drink's clock time to place its marker.
 async function loadLive() {
-  const { data, error } = await sb
-    .from("night_summary").select("*").order("night", { ascending: true }).limit(45);
+  // DESC + limit to get the 45 MOST RECENT nights, then flip back to
+  // ascending -- everything below assumes oldest-first (data[data.length-1]
+  // as "latest", D.dates as an ascending timeline). Querying ascending with
+  // a limit instead returns the 45 OLDEST nights: harmless while the table
+  // had <=45 rows, but the moment it passed 45 the newest night silently
+  // stopped coming back at all, and it would fall one more day behind for
+  // every day past that. Not the trimInProgressNight placeholder logic --
+  // the real row never reached the client to begin with.
+  const { data: desc, error } = await sb
+    .from("night_summary").select("*").order("night", { ascending: false }).limit(45);
+  const data = desc ? [...desc].reverse() : desc;
   if (error || !data?.length) return null;
 
   // Number(null) is 0, not NaN -- a bare Number() on a not-yet-computed column
