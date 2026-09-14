@@ -136,7 +136,9 @@ def fetch(data_type, start: datetime, end: datetime, token, method="list"):
                     body = json.loads(r.read())
                 break
             except urllib.error.HTTPError as e:
-                if e.code == 429 and attempt < 3:
+                # 429 (rate limit) and 5xx (transient server error) are worth
+                # a retry; a 4xx like 400/401/403 never gets better on retry.
+                if e.code in (429, 500, 502, 503, 504) and attempt < 3:
                     time.sleep(1.5 * (attempt + 1))
                     continue
                 raise RuntimeError(_explain(e, data_type)) from None

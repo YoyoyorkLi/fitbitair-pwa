@@ -137,16 +137,18 @@ def main(argv=None):
         bf.backfill(int(arg) if arg else 36)
 
     elif cmd == "push":
+        from . import ingest as ig
         from . import push as ps
-        if arg == "sync":             # catch-up sync, then push -- the CI path.
-            from . import ingest as ig
-            print("catching up ...")
-            ig.sync(days=None, verbose=True)
-        elif arg:                     # optional: sync N days first, then push
-            from . import ingest as ig
-            print(f"syncing {arg} days first ...")
-            ig.sync(days=int(arg), verbose=True)
-        ps.push()
+        try:
+            if arg == "sync":         # catch-up sync, then push -- the CI path.
+                print("catching up ...")
+                ig.sync(days=None, verbose=True)
+            elif arg:                 # optional: sync N days first, then push
+                print(f"syncing {arg} days first ...")
+                ig.sync(days=int(arg), verbose=True)
+            ps.push()
+        except RuntimeError as e:
+            sys.exit(f"\n\nSync failed:\n  {e}")
 
     elif cmd == "doctor":
         from . import ingest, metrics

@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -117,15 +118,27 @@ def _request(url, key, path, payload=None, method="POST", prefer=None):
     if prefer:
         headers["Prefer"] = prefer
     req = urllib.request.Request(url + path, data=body, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            raw = r.read()
-            return json.loads(raw) if raw else None
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "replace")[:400]
-        raise RuntimeError(f"supabase {e.code} on {method} {path}: {detail}") from None
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"cannot reach supabase: {e.reason}") from None
+    # Retrying a POST/PATCH here is safe even though the verb isn't normally
+    # idempotent: every caller either upserts nights on their primary key or
+    # PATCHes the single sync_state row, so replaying it changes nothing.
+    # Same backoff as ingest.fetch() -- a 5xx/network blip here used to fail
+    # the whole run with no second attempt.
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                raw = r.read()
+                return json.loads(raw) if raw else None
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "replace")[:400]
+            if e.code in (429, 500, 502, 503, 504) and attempt < 3:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise RuntimeError(f"supabase {e.code} on {method} {path}: {detail}") from None
+        except urllib.error.URLError as e:
+            if attempt < 3:
+                time.sleep(1.0 * (attempt + 1))
+                continue
+            raise RuntimeError(f"cannot reach supabase: {e.reason}") from None
 
 
 # ------------------------------------------------------------------ shaping

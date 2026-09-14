@@ -63,18 +63,31 @@ def _post(body):
     req = urllib.request.Request(
         TOKEN_ENDPOINT, data=urllib.parse.urlencode(body).encode(),
         headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.loads(r.read())
-    except urllib.error.HTTPError as e:
+    # Every sync run hits this once before touching any data -- unlike
+    # ingest.fetch(), it never retried a transient blip, so one bad DNS
+    # lookup or a 502 from Google's token endpoint failed the whole run.
+    # Same backoff as ingest.fetch(): retry a 5xx or network error a few
+    # times, but not a 4xx (invalid_grant etc. -- retrying that just burns
+    # four attempts on something that will never succeed).
+    for attempt in range(4):
         try:
-            detail = json.loads(e.read() or b"{}")
-        except Exception:
-            detail = {}
-        raise RuntimeError(f"token endpoint {e.code}: {detail.get('error')} "
-                           f"{detail.get('error_description', '')}") from None
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"cannot reach Google: {e.reason}") from None
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            try:
+                detail = json.loads(e.read() or b"{}")
+            except Exception:
+                detail = {}
+            if e.code >= 500 and attempt < 3:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise RuntimeError(f"token endpoint {e.code}: {detail.get('error')} "
+                               f"{detail.get('error_description', '')}") from None
+        except urllib.error.URLError as e:
+            if attempt < 3:
+                time.sleep(1.0 * (attempt + 1))
+                continue
+            raise RuntimeError(f"cannot reach Google: {e.reason}") from None
 
 
 def auth_url(state):
