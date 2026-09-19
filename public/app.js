@@ -1931,8 +1931,7 @@ function renderDrinksTab(D) {
     <div class="calgrid">
       ${CAL_WEEKDAYS.map((d) => `<div class="calhead">${d}</div>`).join("")}
       ${cells}
-    </div>
-    <p class="note" style="margin-top:14px">Nights outlined in amber had a drink — tap one to see, add, or delete. A drink before ${NIGHT_CUTOFF_H} AM counts toward the night before.</p>`;
+    </div>`;
 }
 
 // The dose-response chart pools every night the account has ever had -- more
@@ -2008,9 +2007,10 @@ $("trends").addEventListener("click", (e) => {
 // tapping one is setDay(). Own month cursor, like theirs -- browsing March here
 // says nothing about which night is selected.
 //
-// A cell is a MORNING (D.dates is wake dates), so its amber dot is the drinks
-// the night before -- D.drinks, the same number the Day tab's strip reports --
-// and not the Drinks calendar's cell for that date, which is the evening after.
+// Its dots read the same arrays the Drinks and Workouts calendars do, so a date
+// carries the same mark in all three. Mind that the Day tab a cell opens is that
+// date's MORNING: the amber dot is the night that STARTS on the date, and the
+// aftermath of it (the "drinks the night before" strip) is one day on.
 let pickYear = null, pickMonth = null;   // pickMonth is 0-indexed, JS Date style
 const monthKey = (iso) => { const [y, m] = iso.split("-").map(Number); return y * 12 + m - 1; };
 
@@ -2046,7 +2046,7 @@ function renderDayPicker() {
   for (let day = 1; day <= daysInMonth; day++) {
     const idx = byDate.get(`${pickYear}-${pad2(pickMonth + 1)}-${pad2(day)}`);
     if (idx == null) { cells += `<div class="calcell out">${day}</div>`; continue; }
-    const dr = D.drinks[idx] > 0, wo = (D.workouts[idx]?.length || 0) > 0;
+    const dr = (D.nightRows[idx]?.length || 0) > 0, wo = (D.workouts[idx]?.length || 0) > 0;
     const label = new Date(pickYear, pickMonth, day).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
     cells += `<button type="button" class="calcell pick${idx === dayIdx ? " sel" : ""}" data-pick-idx="${idx}"
       aria-label="${label}"${idx === dayIdx ? ` aria-current="true"` : ""}>${day}${dr || wo
@@ -2062,8 +2062,7 @@ function renderDayPicker() {
     <div class="calgrid">
       ${CAL_WEEKDAYS.map((d) => `<div class="calhead">${d}</div>`).join("")}
       ${cells}
-    </div>
-    <p class="note" style="margin-top:14px">Tap a night to open it. <span class="lg dr"></span> drinks the night before · <span class="lg wo"></span> workout.</p>`;
+    </div>`;
 }
 
 // ------------------------------------------------------------------ day nav

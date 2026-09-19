@@ -384,10 +384,9 @@ a{color:var(--accent)}
 .calcell.pick.sel{background:var(--accent);border-color:var(--accent);color:var(--bg);font-weight:700}
 /* Up to two dots, centred as a pair: drinks the night before, and a workout. */
 .pds{position:absolute;bottom:4px;left:0;right:0;display:flex;justify-content:center;gap:3px}
-.pds i,.lg{width:6px;height:6px;border-radius:50%;display:block}
-.pds .dr,.lg.dr{background:var(--drink)}
-.pds .wo,.lg.wo{background:var(--strain)}
-.lg{display:inline-block;vertical-align:middle;margin:0 2px 1px}
+.pds i{width:6px;height:6px;border-radius:50%;display:block}
+.pds .dr{background:var(--drink)}
+.pds .wo{background:var(--strain)}
 /* margin-bottom is the fix here, not margin-top: .note is 0-bottom by
    default (the usual case is a caption sitting flush above the next .card's
    own top margin), which on this page meant the caption text touched the
