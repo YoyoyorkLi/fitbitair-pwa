@@ -531,8 +531,12 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null,
   // the same full-day chart the burst would smear. Every drink's time is in
   // the card's caption (app.js) regardless.
   const R = 6.5, ROWS = [y0 - 12, y0 - 27], CLUSTER_MIN = 8;
+  // A drinking-night curve runs past midnight, and t[] above is unrolled to
+  // match, so a 1 AM drink is minute 60 of the clock but minute 1500 of this
+  // chart. Roll it forward the way unroll() does the curve; a civil-day chart
+  // never has a marker that far behind its own start, so nothing changes there.
   const shown = drinks
-    .map((s) => ({ at: s, v: mins(s) }))
+    .map((s) => { let v = mins(s); if (v < tLo - 3) v += 1440; return { at: s, v }; })
     .filter((d) => d.v >= tLo - 3 && d.v <= tHi + 3)
     .sort((a, b2) => a.v - b2.v)
     .map((d, i) => ({ ...d, n: i + 1, x: X(Math.min(Math.max(d.v, tLo), tHi)) }));

@@ -37,6 +37,11 @@ a{color:var(--accent)}
 /* Only looks tappable once tapping it would do something. */
 .daynav.stepped .stamp{color:var(--accent);text-decoration:underline;text-underline-offset:3px}
 
+/* Night picker button: sits with the ‹ › pair (it is navigation, not an action),
+   muted like the sync glyph so the date stays the loudest thing in the header. */
+.cal{color:var(--muted)}
+.nav svg{display:block}
+
 /* Sync now. Set apart from the ‹ › pair so a thumb reaching for "previous"
    does not start a four-minute job by accident. */
 .sync{margin-left:8px;font-size:23px;color:var(--muted)}
@@ -233,6 +238,9 @@ a{color:var(--accent)}
 .drinkrow{display:flex;align-items:center;justify-content:space-between;gap:10px;
   background:var(--panel2);border-radius:5px;padding:10px 12px;font-size:13.5px}
 .drinkrow .wtime{color:var(--text);font-size:14px;font-weight:600}
+/* The calendar date of a drink that fell after midnight, under the night it
+   belongs to. Quieter than the time: it is context, not the fact. */
+.drinkrow .wday{color:var(--muted);font-size:12.5px;font-weight:400;margin-left:8px}
 .drdel{background:none;border:1px solid var(--grid);color:var(--muted);border-radius:6px;
   width:34px;height:34px;font-size:17px;line-height:1;flex:none;
   -webkit-tap-highlight-color:transparent}
@@ -248,6 +256,8 @@ a{color:var(--accent)}
 .drinkadd .field span{font-size:12px}
 .drinkadd input{width:150px}
 .drinkadd button.primary{width:auto;padding:13px 28px;flex:0 0 auto}
+/* Its own row under the field and button, whatever the width. */
+.drinkadd .note{flex:1 0 100%;margin:0}
 
 /* Drinks tab: "Log a drink now" — the in-app tap. Amber to tie it to drinks;
    the calendar below is for backfilling past nights. */
@@ -365,6 +375,19 @@ a{color:var(--accent)}
   border-radius:999px;background:var(--strain);color:var(--bg);
   font-size:8.5px;font-weight:700;line-height:6px;display:flex;align-items:center;justify-content:center;
 }
+/* The Day tab's night picker: the same grid, but every loaded night is a target
+   and the one you are on is filled. The overlay is fixed to the viewport, so on
+   a desktop window it would stretch the grid edge to edge -- the side padding
+   keeps it phone-sized there and is the plain 16px gutter on an actual phone. */
+.picker{padding-left:max(16px,calc((100vw - 520px)/2));padding-right:max(16px,calc((100vw - 520px)/2))}
+.calcell.pick{cursor:pointer;-webkit-tap-highlight-color:transparent}
+.calcell.pick.sel{background:var(--accent);border-color:var(--accent);color:var(--bg);font-weight:700}
+/* Up to two dots, centred as a pair: drinks the night before, and a workout. */
+.pds{position:absolute;bottom:4px;left:0;right:0;display:flex;justify-content:center;gap:3px}
+.pds i,.lg{width:6px;height:6px;border-radius:50%;display:block}
+.pds .dr,.lg.dr{background:var(--drink)}
+.pds .wo,.lg.wo{background:var(--strain)}
+.lg{display:inline-block;vertical-align:middle;margin:0 2px 1px}
 /* margin-bottom is the fix here, not margin-top: .note is 0-bottom by
    default (the usual case is a caption sitting flush above the next .card's
    own top margin), which on this page meant the caption text touched the

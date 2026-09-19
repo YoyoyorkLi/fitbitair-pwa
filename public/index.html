@@ -39,6 +39,13 @@
       <button class="nav" id="day-prev" type="button" aria-label="Previous night">‹</button>
       <button class="stamp" id="stamp" type="button"></button>
       <button class="nav" id="day-next" type="button" aria-label="Next night">›</button>
+      <!-- Jump to any loaded night from a month grid instead of stepping ‹ ›
+           one at a time. A button of its own rather than the date stamp: the
+           stamp already means "back to the latest night" and, five taps deep,
+           the debug overlay. -->
+      <button class="nav cal" id="cal-btn" type="button" aria-label="Pick a night" title="Pick a night">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+      </button>
       <!-- Hidden on the demo, and until a live session exists: without one
            /api/sync has nothing to authenticate and would only ever 401. -->
       <button class="nav sync" id="sync-btn" type="button" aria-label="Sync now" title="Sync now" hidden><span>⟳</span></button>
@@ -107,6 +114,17 @@
       <h1 id="drinks-day-title"></h1>
     </div>
     <div id="drinks-day-body"></div>
+  </div>
+
+  <!-- The Day tab's night picker: a month grid opened from the header's
+       calendar button. Same overlay pattern as the three above, so Escape and
+       the edge-swipe close it through topOverlay() like they close those. -->
+  <div id="day-picker" class="detail picker" hidden>
+    <div class="detail-head">
+      <button id="day-picker-close" class="nav" type="button" aria-label="Back">‹</button>
+      <h1>Pick a night</h1>
+    </div>
+    <div id="day-picker-body"></div>
   </div>
 </section>
 
