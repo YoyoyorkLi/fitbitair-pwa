@@ -879,17 +879,3 @@ def load_state(body_load):
         return None
     return 0 if body_load < 0.5 else 1 if body_load < 1.0 else 2
 
-
-def consistency(nights, n=14):
-    """Circular SD of bedtime -> 0-100.
-
-    Circular statistics are required because bedtimes wrap midnight: the
-    arithmetic mean of 23:50 and 00:10 is 11:00, which is wrong by 12 hours.
-    """
-    if len(nights) < 3:
-        return 0
-    ang = [2 * np.pi * ((x["start"].hour * 60 + x["start"].minute) / 1440)
-           for x in nights[-n:]]
-    r = float(np.hypot(np.mean(np.cos(ang)), np.mean(np.sin(ang))))
-    sd_min = np.sqrt(-2 * np.log(max(r, 1e-9))) * 1440 / (2 * np.pi)
-    return int(round(100 * float(np.clip(1 - sd_min / 120, 0, 1))))

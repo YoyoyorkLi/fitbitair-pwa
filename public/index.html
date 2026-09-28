@@ -31,8 +31,8 @@
 </section>
 
 <section id="dash" class="screen" hidden>
-  <!-- The night selector. Every panel on the Day and Sleep tabs is scoped to
-       one night, so the date is a control, not a caption. Tapping the date
+  <!-- The night selector. Every panel on the Day tab and its detail screens is
+       scoped to one night, so the date is a control, not a caption. Tapping the date
        itself jumps back to the newest night. -->
   <div class="top" id="dash-top">
     <div class="daynav" id="daynav">
@@ -99,8 +99,8 @@
 
   <!-- One night's drinks: opened from a marked day on the Drinks calendar.
        Same overlay pattern as #workout-day -- add/delete write straight to
-       the drinks table (like the never-built "Fix-up screen" schema.sql
-       already provisioned RLS for), then re-render from the refreshed data. -->
+       the drinks table (schema.sql's RLS already allows it), then re-render from
+       the refreshed data. -->
   <div id="drinks-day" class="detail" hidden>
     <div class="detail-head">
       <button id="drinks-day-close" class="nav" type="button" aria-label="Back">‹</button>

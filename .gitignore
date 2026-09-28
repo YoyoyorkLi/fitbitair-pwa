@@ -15,7 +15,6 @@ pulse/**/__pycache__/
 pulse/**/*.pyc
 pulse/pulse.db
 pulse/pulse-demo.db
-pulse/dashboard.html
 
 # Google credentials + the live refresh token. This repo is PUBLIC --
 # .token.json in particular is a standing credential, not a config value;

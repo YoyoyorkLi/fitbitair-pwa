@@ -35,9 +35,8 @@ need = 420 + min(30, 3 · max(0, yesterday_strain − 10))
 - **Debt is not folded in.** The old formula added up to 90 min of accumulated
   debt to `need`; that made the two reinforce each other and the number ran
   away. Debt is now tracked and shown entirely on its own (below).
-- **Sleep goal** (`cfg.SLEEP_GOAL_MIN = 480`, 8 h) is aspirational only — a
-  reference line and a "nights hit" idea in the UI. It never enters the score
-  or the debt.
+- **Sleep goal** (8 h, `GOAL_MIN` in `public/app.js`) is display-only — the
+  Sleep detail says when you hit it. It never enters the score or the debt.
 
 ## Sleep debt
 
@@ -365,11 +364,6 @@ recovery = round( 100 · (0.55·hrv_c + 0.25·rhr_c + 0.20·slp_c) )
 `perf` shifts slightly under the rebuild because `need` is now a flat 7 h rather
 than the old debt-inflated figure — a 7 h night reads as `perf = 1.0` where it
 used to be penalised.
-
-## Sleep timing / consistency
-
-`consistency()` — unchanged. Circular SD of bedtime over 14 nights → 0–100.
-Circular statistics are required because bedtimes wrap midnight.
 
 ## ACWR
 

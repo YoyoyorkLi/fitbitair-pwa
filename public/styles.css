@@ -1,5 +1,4 @@
-/* Pulse — palette lifted from pulse/config.py so the PWA and the Python-rendered
-   charts stay one design system. Dark only, on purpose: this is read in bed. */
+/* Pulse palette. Dark only, on purpose: this is read in bed. */
 :root{
   --bg:#0B0E14; --panel:#141924; --panel2:#1C2230; --grid:#252C3B;
   --text:#E6EAF2; --muted:#7E8AA3; --dim:#5A6478;
@@ -46,8 +45,7 @@ a{color:var(--accent)}
    it read as crowding the status bar. A little more, for that page only. */
 #trends{padding-top:calc(var(--top-gap) + 12px)}
 
-/* Night selector. Meets Apple's 44px touch-target advice now that there is no
-   brand wordmark left to crowd off a 320px screen for it. Arrow keys and the
+/* Night selector. Meets Apple's 44px touch-target advice. Arrow keys and the
    swipe gesture are the other two ways in. */
 .daynav{display:flex;align-items:center;gap:5px}
 .nav{background:var(--panel);border:1px solid var(--grid);color:var(--text);
@@ -204,29 +202,12 @@ a{color:var(--accent)}
    viewBox shrinking type to ~4px on a phone. Nothing here scrolls sideways now,
    so there is no edge-fade to signal either. */
 .chartbox svg{display:block;width:100%;height:auto}
-/* touch-action:none on the charts, plus a preventDefault on touchstart in
-   bindScrub. Together they mean a drag that starts on a chart is the
-   scrubber's and cannot scroll the page.
-
-   Read the git history of this block with suspicion. It accumulated four
-   rounds of explanation -- pan-y being unimplemented, WebKit resolving
-   touch-action from the hit element, text selection eating the gesture -- all
-   of it reasoned from a debug log that could not report a moving gesture, and
-   none of it the actual bug. The scrubber froze because bindScrub cancelled
-   its own drag whenever a thumb rolled downward on contact, and iOS was
-   delivering every move event the whole time. See the note above `begin` in
-   app.js.
-
-   These declarations are kept because they are correct on their own terms:
-   the gesture belongs to the chart and nothing should scroll, select or pop a
-   callout underneath it. The descendant selector matters because touch-action
-   is not inherited, and the element a finger lands on is a <rect>, never the
-   container.
-
-   The cost is real and deliberate: you cannot scroll the page by starting a
-   drag on a chart. There is room between the cards to scroll from. If that
-   ever becomes annoying, pan-y is worth a fresh try -- the case against it
-   was built on the same bad measurement as everything else here. */
+/* A drag that starts on a chart belongs to the scrubber: nothing scrolls,
+   selects or pops a callout underneath it (bindScrub also preventDefaults
+   touchstart). The descendant selector matters -- touch-action is not
+   inherited, and the element a finger lands on is a <rect>, never the
+   container. The cost is deliberate: you cannot scroll the page by starting a
+   drag on a chart; there is room between the cards to scroll from. */
 .chartbox.scrubbable, .chartbox.scrubbable *,
 .chartbox:has(svg[data-scrub]), .chartbox:has(svg[data-scrub]) *{
   touch-action:none;
@@ -239,19 +220,11 @@ a{color:var(--accent)}
    so a thumb on the chart is never on top of the number it just asked for.
    Reserves its own line whether or not it is populated — a row that appears on
    touch would shove every chart down the page mid-drag. */
-/* No generated content on the span, and no text-overflow:ellipsis.
-   The device caught the bug this fixes: the ?debug log showed the DOM holding
-   "Aug 28|60.8 ms" while the screen displayed "Aug 28 · 69.7 ms", a value
-   from two bands earlier. The date repainted; everything to the right of it
-   did not. Correct string, stale pixels.
-   The separator used to be a ::before on the span -- generated content on
-   exactly the element that failed to repaint, inside the -webkit-line-clamp
-   box the phone breakpoint below puts this element in. That combination is
-   the likely culprit; note that on a phone text-overflow:ellipsis was never
-   even active, since the breakpoint overrides white-space to normal. The " · "
-   is now part of the span's own text, and the tail is one span rather than
-   one per segment.
-   Do not reintroduce a pseudo-element here to draw a separator. */
+/* No generated content (::before/::after) on the readout's spans, and no
+   text-overflow:ellipsis: on a phone the readout sits in a -webkit-line-clamp
+   box, and a ::before separator there once left a stale value painted while the
+   DOM held the right one. The " · " is part of the span's own text -- do not
+   reintroduce a pseudo-element to draw a separator. */
 .readout{
   min-height:34px;margin:-8px 0 10px;font-size:14px;line-height:1.3;
   color:var(--dim);font-variant-numeric:tabular-nums;
@@ -265,15 +238,11 @@ a{color:var(--accent)}
 .readout.live{color:var(--muted)}
 .readout.live b{color:var(--text)}
 
-/* The readout and its steppers share one row.
-   The steppers were added while the drag was still broken, on the theory that
-   iOS was withholding move events. It was not -- that was our own bug. They
-   have earned their place anyway: on a phone a fingertip covers several days
-   of a 7-band chart, so tapping near the value you want and stepping onto it
-   beats trying to land on it. They are ordinary buttons OUTSIDE .chartbox, so
-   the touch-action:none covering the chart does not reach them.
-   The row reserves its height for the same reason the readout always did:
-   nothing may move while you are interacting with it. */
+/* The readout and its steppers share one row. On a phone a fingertip covers
+   several days of a 7-band chart, so tapping near the value you want and
+   stepping onto it beats landing on it. They are ordinary buttons OUTSIDE
+   .chartbox, so its touch-action:none does not reach them. The row reserves its
+   height so nothing moves while you are interacting with it. */
 .readrow{display:flex;align-items:center;gap:6px;margin:-8px 0 10px}
 .readrow .readout{margin:0;flex:1;min-width:0}
 .stepper{display:flex;gap:2px;flex:none}

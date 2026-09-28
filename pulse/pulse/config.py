@@ -49,11 +49,7 @@ STRAIN_SCALE = 21                        # 21 = WHOOP axis; 100 = Bevel percent
 # staying measurably impaired, but for a personal tool "I feel good on 7" is a
 # reasonable call, and anchoring NEED an hour too high makes every score look
 # worse than the night was and pins sleep debt at its ceiling forever.
-#
-# GOAL is aspirational -- a target line on the charts and a "nights hit" count.
-# It never touches the score or the debt.
 SLEEP_NEED_MIN = 420                     # 7h -- personal baseline (was 8h)
-SLEEP_GOAL_MIN = 480                     # 8h -- display-only stretch target
 SLEEP_NEED_HARDDAY_MAX = 30             # up to +30 min the night after a hard day
 
 # Sleep debt: a rolling shortfall over the last N nights vs NEED, recent nights
@@ -193,13 +189,4 @@ DAILY_FIELDS = {
                                      "averageHeartRateVariabilityMilliseconds"),
     "daily-respiratory-rate":       ("dailyRespiratoryRate", "breathsPerMinute"),
     "daily-oxygen-saturation":      ("dailyOxygenSaturation", "averagePercentage"),
-}
-
-# ---- Palette -----------------------------------------------------------
-C = {
-    "bg": "#0B0E14", "panel": "#141924", "panel2": "#1C2230", "grid": "#252C3B",
-    "text": "#E6EAF2", "muted": "#7E8AA3",
-    "deep": "#3B4EE0", "light": "#5B8DEF", "rem": "#9B5BEF", "awake": "#F2A93B",
-    "strain": "#2FD4C6", "good": "#3FD68A", "warn": "#F2545B", "accent": "#5B8DEF",
-    "zone": ["#3A4358", "#4C7BD6", "#3FD68A", "#F2A93B", "#F2545B"],
 }

@@ -226,28 +226,18 @@ function bindTips(root) {
 
 // ------------------------------------------------------------------ scrubber
 // Drag anywhere across a chart and a crosshair follows your finger while the
-// values land in the card's readout row. This replaces hover on touch, where
-// hover does not exist -- previously a phone could only tap one 3px mark at a
-// time and got a bubble underneath its own thumb for the trouble.
+// values land in the card's readout row -- the touch replacement for hover.
 //
 // The contract with charts.js: the <svg> carries data-scrub, and every sample
 // has a `rect[data-i]` hit band carrying data-x (centre, in user units),
 // optional data-y (the mark, for the cursor dot) and data-tip (the text).
 // Nothing here re-derives a scale, so the crosshair cannot drift from the marks.
 // ---- touch diagnostics, behind ?debug ------------------------------------
-// Two fixes for the same frozen-scrubber bug were built on reasoning a desktop
-// browser could not falsify, and both were wrong. This prints what the phone
-// actually does. Entirely inert without the query param.
-// ?debug turns the overlay on in a browser tab. It cannot turn it on in the
-// INSTALLED app, which is the context this bug is now suspected to live in:
-// the home-screen app launches at start_url ("/") with no address bar, so the
-// query string is unreachable, and its storage is a separate partition from
-// Safari's (see the sign-in note in index.html), so a flag set in the browser
-// does not carry across either. Five taps on the date stamp, then -- it used
-// to be the "Pulse" wordmark, retired for being visual clutter with no other
-// job; the stamp is the next thing in the header that is always present and
-// always tappable, and it already tells taps apart by count/timing for its
-// own single-tap behaviour, so a second listener here costs nothing.
+// Prints what a phone actually does (gestures, viewport, the tab bar's position),
+// which a desktop browser cannot reproduce. Inert unless switched on. ?debug does
+// it in a browser tab; the installed home-screen app has no address bar and a
+// storage partition of its own, so there five taps on the date stamp toggle it,
+// and the choice is kept in localStorage.
 const DBG_KEY = "pulse-debug";
 const stickyDbg = () => { try { return localStorage.getItem(DBG_KEY) === "1"; } catch { return false; } };
 let DBG = new URLSearchParams(location.search).has("debug") || stickyDbg();
@@ -260,11 +250,12 @@ addEventListener("click", (e) => {
   brandTaps = 0;
   DBG = !DBG;
   try { localStorage.setItem(DBG_KEY, DBG ? "1" : "0"); } catch { /* private mode */ }
-  if (DBG) dbg(`debug ON ${CTX} | BUILD ${BUILD} | tap the wordmark 5x to stop`);
+  if (DBG) dbg(`debug ON ${CTX} | BUILD ${BUILD} | tap the date 5x to stop`);
   else if (dbgBox) { dbgBox.remove(); dbgBox = null; }
 });
-// Bumped by hand whenever the scrubber changes. Compared against the commit
-// /api/config reports, so a stale cached bundle is visible instead of inferred.
+// Labels this bundle in the debug log, next to the commit /api/config reports, so
+// a stale cached bundle is visible instead of inferred. Bump it by hand when two
+// bundles need telling apart.
 const BUILD = "scrubber-fixed";
 let dbgBox = null;
 function dbg(line) {
@@ -362,34 +353,20 @@ function bindScrub(root) {
   let gesture = false;                   // did this touch start on a chart?
   let what = "";                         // which chart, for the one log line
 
-  // Consume BOTH event streams instead of betting on one. scrubAt is
-  // idempotent, so being driven twice for one movement costs a redundant index
-  // lookup and nothing else.
+  // Consumes BOTH event streams (pointer and touch); scrubAt is idempotent, so
+  // being driven twice for one movement costs a redundant index lookup.
   //
-  // There is deliberately NO axis arbitration here any more, and that removal
-  // is the fix for the bug this file spent ten commits on.
-  //
-  // The old rule was: claim the gesture at 10px of horizontal travel, but if
-  // 24px of VERTICAL travel comes first, release the drag so the page can
-  // scroll. Sound rule -- until 4528578 set touch-action:none on the charts,
-  // which made scrolling from a chart impossible. From that commit on, the
-  // release had nothing left to release TO. It could only destroy drags.
-  //
-  // And it destroyed nearly all of them, because a thumb pivots. The device
-  // log for a deliberate sideways drag reads dx=1 dy=30 over its first four
-  // samples: the finger rolls down as it lands, crosses the vertical
-  // threshold before the horizontal one, and the drag is cancelled ~40ms in.
-  // Everything after that is ignored, which is precisely "it shows one value
-  // and then freezes".
-  //
-  // Two fixes that were each correct on their own arrived in the wrong order
-  // and became a bug. Nothing about iOS was ever broken.
+  // No axis arbitration, on purpose: a drag that starts on a chart is the
+  // scrubber's for its whole life (touch-action:none, so the page cannot scroll
+  // from a chart anyway). Releasing the drag on vertical travel looks safe but
+  // is not -- a thumb pivots as it lands, so a deliberate sideways drag can read
+  // dy=30 before dx=10 and would be cancelled ~40ms in.
   const begin = (svgEl, x, y) => {
     drag = svgEl; sx = lx = x; sy = ly = y; gesture = true;
     if (DBG) what = `${svgEl.dataset.scrub}/${bandsOf(svgEl).length}`;
-    nPointer = 0; nTouch = 0;            // reset HERE, not at the end -- the
-    scrubAt(svgEl, x);                   // previous version counted the moves
-  };                                     // of the gesture before this one
+    nPointer = 0; nTouch = 0;            // per gesture, reset on every start
+    scrubAt(svgEl, x);
+  };
 
   const move = (x, y) => {
     if (!drag) return;
@@ -397,14 +374,9 @@ function bindScrub(root) {
     scrubAt(drag, x);
   };
 
-  // The one diagnostic worth keeping. It logs EVERY gesture that started on a
-  // chart, not just the ones still holding a drag at the end -- the old guard
-  // was `if (drag)`, and the axis rule that used to live here set drag to
-  // null, so the only gestures that could reach this line were the ones with
-  // no movement in them. "pointermoves=0" was a tautology printed by taps, and
-  // it is what sent eight fixes hunting a platform that was working fine.
-  // A log that can only report the outcome it is looking for is worse than no
-  // log, so this one reports every gesture and the distance it actually moved.
+  // Logs EVERY gesture that started on a chart and the distance it actually
+  // moved, not only the ones still holding a drag at the end -- a log that can
+  // only report the outcome it is looking for is worse than none.
   const end = (why) => {
     if (gesture) {
       dbg(`${why}: ${what} moves p=${nPointer} t=${nTouch} ` +
@@ -431,33 +403,22 @@ function bindScrub(root) {
   // ours. Also a second chance at the movement when pointermove stays silent.
   root.addEventListener("touchmove", (e) => {
     if (!drag) return;
-    nTouch++;                             // count BEFORE any guard: the old
-    const t = e.touches[0];               // order could report 0 touchmoves
-    if (!t) return;                       // while touchmoves were arriving
+    nTouch++;                             // counted before any guard
+    const t = e.touches[0];
+    if (!t) return;
     if (e.cancelable) e.preventDefault();
     move(t.clientX, t.clientY);
   }, { passive: false });
 
-  // Claim the gesture at touchstart, non-passively.
+  // Claim the gesture at touchstart, non-passively. preventDefault() on a
+  // NON-PASSIVE touchstart is what tells WebKit the touch sequence belongs to the
+  // page; touch-action only covers scrolling and zooming, not the selection,
+  // callout and drag recognizers, and preventDefault is a no-op on a passive
+  // listener.
   //
-  // This is the one thing eight attempts never actually did. Attempt #2 was
-  // "claim the gesture with preventDefault", but it put the call in the move
-  // handler -- which is the handler that never runs, so no preventDefault in
-  // the touch path has ever executed. Attempts #6-#10 all tried to say the
-  // same thing declaratively with touch-action, which WebKit applies to
-  // scrolling and zooming; it is not what arms the selection, callout and
-  // drag recognizers.
-  //
-  // preventDefault() on a NON-PASSIVE touchstart is the imperative version,
-  // and it is the documented way to tell WebKit a touch sequence belongs to
-  // the page. The old listener was registered { passive: true }, where
-  // preventDefault is a no-op the browser ignores, so this could not have
-  // worked even if it had been called.
-  //
-  // Cost: the synthesized click on a chart is suppressed. Nothing binds click
-  // on a chart -- scrubbing runs off pointerdown -- and page scrolling from a
-  // chart was already given up to touch-action:none, so there is nothing left
-  // here to lose. Steppers are outside .chartbox and keep their clicks.
+  // Cost: the synthesized click on a chart is suppressed. Nothing binds click on
+  // a chart (scrubbing runs off pointerdown), and the steppers sit outside
+  // .chartbox and keep their clicks.
   root.addEventListener("touchstart", (e) => {
     const s = e.target.closest?.("svg[data-scrub]");
     if (!s) return;
@@ -1238,8 +1199,7 @@ function renderDay() {
 
 // -------------------------------------------------------------- card detail
 // Each Day-tab dial opens onto the charts that actually explain its number,
-// instead of sending you hunting across the Day and Trends tabs for them --
-// this is also where the old standalone Sleep tab's charts now live.
+// instead of sending you hunting across the Day and Trends tabs for them.
 const DETAIL_TITLE = { strain: "Day Strain", recovery: "Recovery", sleep: "Sleep Score" };
 let detailKind = null;   // re-rendered by renderDay() above whenever open, so a sync or resize can't leave it stale
 

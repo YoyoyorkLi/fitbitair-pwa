@@ -369,7 +369,7 @@ function buildHypno(span) {
 }
 let H = buildHypno(hypSpan);
 // re-scale the fixture's stage totals to what the hypnogram actually produced,
-// so the Sleep tab's numbers and its ribbon can't disagree
+// so the Sleep detail's numbers and its ribbon can't disagree
 S.deep[LAST] = H.tot.DEEP; S.light[LAST] = H.tot.LIGHT;
 S.rem[LAST] = H.tot.REM; S.awake[LAST] = H.tot.AWAKE;
 S.asleep[LAST] = H.tot.DEEP + H.tot.LIGHT + H.tot.REM;

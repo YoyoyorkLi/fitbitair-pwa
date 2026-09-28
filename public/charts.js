@@ -1,39 +1,23 @@
-// Pure SVG chart builders. Each takes plain arrays and returns an SVG string —
+// Pure SVG chart builders. Each takes plain arrays and returns an SVG string --
 // no DOM, no fetch, no globals beyond the CSS custom properties.
 //
-// Ported from pulse/charts.py, which rendered these server-side into a static
-// HTML file. Same shapes, same palette, same reasoning; the difference is that
-// these run in the browser so they can be scrubbed.
-//
-// ---------------------------------------------------------------------------
-// WIDTH IS NOW AN ARGUMENT, and it is the whole reason this file changed.
-//
-// Every chart used to be authored at a fixed 680-unit viewBox and stretched to
-// whatever the card was. A phone's content column is ~270px, so that was a
-// 0.4x shrink: `font-size:10.5` landed at ~4.3 real pixels. Illegible. The old
-// `min-width:520px` + horizontal scroll existed to hold a legibility floor, not
-// out of laziness — it traded "can't read the labels" for "have to drag".
-//
-// Passing the measured pixel width in and authoring the viewBox at 1 unit = 1
-// CSS pixel removes the trade entirely: 10.5 means 10.5px on every device, the
-// chart always fits its card, and nothing scrolls. The cost is that padding and
-// tick counts have to be computed from W rather than hardcoded — which is what
-// `narrow()`, `padL()` and `dateAxis()` below are for.
+// WIDTH IS AN ARGUMENT. Charts are authored at the measured pixel width of their
+// card, so the viewBox is 1:1 with CSS pixels: font-size 10.5 is 10.5px on every
+// device, the chart always fits its card, and nothing scrolls. (A fixed 680-unit
+// viewBox stretched to a ~270px phone column shrank the type to ~4px.) The cost
+// is that padding and tick counts are computed from W, which is what `narrow()`,
+// `padL()` and `dateAxis()` below are for.
 //
 // Interaction contract: any element carrying data-tip is hoverable, and app.js
 // installs one delegated listener for the whole page rather than a handler per
-// mark. "|" splits a tip into lines. Charts that additionally emit
-// `data-scrub` on the <svg> plus `rect[data-i]` hit bands get the drag
-// scrubber (see bindScrub in app.js) — that is the touch story, since hover
-// does not exist on a phone.
+// mark. "|" splits a tip into lines. Charts that additionally emit `data-scrub`
+// on the <svg> plus `rect[data-i]` hit bands get the drag scrubber (see
+// bindScrub in app.js) -- the touch story, since hover does not exist on a phone.
 //
-// For a scrub band specifically: put the VALUE first, whatever's being
-// scrubbed to find (a number, a duration, a stage name) — writeReadout in
-// app.js renders segment 0 as the big bold headline. Everything after the
-// first "|" is context (date, time, drink count) and renders small, in one
-// trailing line. Getting this backwards is easy to miss reading one chart in
-// isolation -- it only becomes obvious once you're scrubbing and the biggest
-// thing on screen is the date.
+// For a scrub band, put the VALUE first, whatever is being scrubbed to find (a
+// number, a duration, a stage name): writeReadout in app.js renders segment 0 as
+// the big bold headline, and everything after the first "|" as small context
+// (date, time, drink count) on one trailing line.
 
 const CSS = getComputedStyle(document.documentElement);
 export const col = (n) => CSS.getPropertyValue("--" + n).trim();
@@ -137,20 +121,17 @@ export const dlabel = (iso) => {
  *  beyond that, where the same weekday name lands on several different weeks. */
 const dlabelWd = (iso, n) => (n <= 14 ? `${wd(iso)}, ${dlabel(iso)}` : dlabel(iso));
 
-// Date ticks along the bottom. THE MISSING AXIS: bars, strain, debt, sleep
-// columns and the sparklines all drew a bare baseline with no dates on it, so
-// every one of them was a shape with no "when". Tick count scales with width —
-// a phone gets 3-4 labels, a laptop 8-10 — because the alternative at 30 days
-// is 30 overlapping ones.
+// Date ticks along the bottom. Tick count scales with width -- a phone gets 3-4
+// labels, a laptop 8-10 -- because the alternative at 30 days is 30 overlapping
+// ones.
 //
-// Strided BACKWARDS from the newest night on purpose. Counting forwards leaves
-// the right edge unlabelled whenever n-1 is not a multiple of the stride, and
-// the right edge is the one date a trend is actually read against; a ragged gap
-// at the old end costs nothing by comparison.
-// A window of 14 days or less never repeats a weekday across two labelled
-// ticks at the usual stride, so "Mon Wed Fri" reads unambiguously; past that
-// the same name would land on two different weeks with nothing distinguishing
-// them, so it falls back to the calendar date.
+// Strided BACKWARDS from the newest night on purpose: counting forwards leaves
+// the right edge unlabelled whenever n-1 is not a multiple of the stride, and the
+// right edge is the one date a trend is read against.
+//
+// A window of 14 days or less never repeats a weekday across two labelled ticks
+// at the usual stride, so "Mon Wed Fri" reads unambiguously; past that the same
+// name would land on two different weeks, so it falls back to the calendar date.
 function dateAxis(W, dates, i0, n, s, y) {
   const step = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(W / 58))));
   const fmt = n <= 14 ? wd : md;
@@ -848,17 +829,14 @@ export function sparkline(W, D, vals, color, days, unit) {
   return svg(W, h, p, `Trend over ${n} days`, "day");
 }
 
-// The payoff chart.
 // Percentage-of-baseline points, shared by doseResponse() and slope() so the
-// two can't quietly disagree the way the chart and the Today-tab strip once
-// did. Each point prefers ITS OWN night's stored hrv_baseline -- a trailing
-// 30-day median computed server-side, excluding that night itself -- over a
-// single whole-account mean. The mean is only a fallback (an account with
-// under 3 prior nights, or a fixture with no baseline column at all): as a
-// shared denominator across every point it drifts every past night's
-// percentage retroactively each time a new one arrives, which a per-night
-// value never does. Verified against real data: the two methods gave 77.5%
-// vs 82% for the same night.
+// chart and the Day tab's strip can't quietly disagree. Each point prefers ITS
+// OWN night's stored hrv_baseline -- a trailing 30-day median computed
+// server-side, excluding that night itself -- over a single whole-account mean.
+// The mean is only a fallback (an account with under 3 prior nights, or a
+// fixture with no baseline column): as a shared denominator it drifts every past
+// night's percentage retroactively each time a new one arrives, which a
+// per-night value never does.
 function pctPoints(D) {
   const hasStored = Array.isArray(D.hrvBaseline);
   const sober = D.hrv.filter((_, i) => !D.drinks[i] && ok(D.hrv[i]));
@@ -938,7 +916,7 @@ export const slope = (D) => {
   const N = pts.length, sx = pts.reduce((a, p) => a + p[0], 0), sy = pts.reduce((a, p) => a + p[1], 0);
   const sxy = pts.reduce((a, p) => a + p[0] * p[1], 0), sxx = pts.reduce((a, p) => a + p[0] * p[0], 0);
   // `base` is kept for callers with no per-night baseline of their own (the
-  // Today-tab strip falls back to it for an account too new to have one) --
+  // Day-tab strip falls back to it for an account too new to have one) --
   // it is deliberately the same whole-history mean every point already falls
   // back to individually, not a third definition of "baseline".
   return { m: (N * sxy - sx * sy) / (N * sxx - sx * sx || 1), base: wholeHistoryMean };

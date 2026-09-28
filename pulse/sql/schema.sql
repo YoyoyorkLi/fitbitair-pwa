@@ -25,9 +25,9 @@
 -- IMMUTABLE (the tz database can be updated under you), and Postgres refuses
 -- STABLE expressions in generated columns. So the tap endpoint computes the
 -- bucket and stores it. This function exists for backfills and for the
--- Fix-up screen, where a human is moving a row to a different night.
+-- a hand edit in the app, where a human is moving a row to a different night.
 --
--- Mirrors the civil-time reasoning in metrics.py:30 -- same trap, same fix:
+-- Mirrors the civil-time reasoning in metrics._tz() -- same trap, same fix:
 -- aggregate in a real IANA zone with DST rules, never a fixed offset.
 --
 -- The order of operations is load-bearing, and it is off by a day exactly once
@@ -42,7 +42,7 @@
 -- one night of the year a phantom drink and its neighbour a missing one.
 --
 -- >>> CHANGE THE ZONE if you are not in Chicago. It is also the default in
--- >>> config.py:52 and web/public/app.js, so a wrong guess is wrong in three places.
+-- >>> config.py (TIMEZONE) and public/app.js, so a wrong guess is wrong in three places.
 create or replace function drink_night(ts timestamptz, tz text default 'America/Chicago')
 returns date language sql stable as $$
   select ((ts at time zone tz) - interval '4 hours')::date;
@@ -78,7 +78,7 @@ create table public.drinks (
   std_drinks  numeric(3,1) not null check (std_drinks > 0 and std_drinks <= 10),
 
   -- 'nfc'    the tag
-  -- 'manual' added later from the Fix-up screen (a forgotten tap)
+  -- 'manual' added later from the app's drinks sheet (a forgotten tap)
   -- 'edit'   a row whose kind/size you corrected after the fact
   -- Kept so you can ask later whether hand-entered nights are less reliable.
   --
@@ -298,7 +298,7 @@ insert into public.sync_state (id) values (1) on conflict do nothing;
 -- quietly route around every policy below. Declared here, the property cannot
 -- be separated from the view -- copy the statement anywhere and it stays safe.
 --
--- This view is the entire read contract with the PWA: web/public/app.js's
+-- This view is the entire read contract with the PWA: public/app.js's
 -- loadLive() selects "*" from it and expects exactly these column names.
 create or replace view public.night_summary with (security_invoker = true) as
 select
@@ -408,7 +408,7 @@ create policy "read drinks"   on public.drinks     for select to authenticated u
 create policy "read nights"   on public.nights     for select to authenticated using (true);
 create policy "read sync"     on public.sync_state for select to authenticated using (true);
 
--- The Fix-up screen writes straight to the table rather than through an
+-- The app's drinks sheet writes straight to the table rather than through an
 -- endpoint. That is the whole reason Supabase won over Neon here: the auto
 -- REST layer means the read/edit path needs no serverless functions at all.
 create policy "add drinks"    on public.drinks for insert to authenticated with check (true);

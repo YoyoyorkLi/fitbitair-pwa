@@ -1,8 +1,7 @@
 """The numeric pipeline: raw cache -> per-night strain / sleep / recovery.
 
-Formerly also rendered a standalone dashboard.html; that front end is gone
-(the PWA in public/ is the only one now). compute() stays because push.py
-turns its output into the Supabase rows the PWA reads.
+compute() feeds push.py, which turns its output into the Supabase rows the PWA
+in public/ reads. There is no other front end.
 """
 from __future__ import annotations
 

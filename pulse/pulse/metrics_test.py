@@ -13,8 +13,6 @@ loose bounds here to match the new intent, not the other way round.
 """
 from __future__ import annotations
 
-import datetime as _dt
-
 import numpy as np
 import pandas as pd
 
@@ -80,8 +78,6 @@ def case(fn):
 @case
 def short_night_cannot_score_high():
     """A flawless 5h night against a 7h need is capped near 0.71 of quality."""
-    hrv_map = {pd.Timestamp("2026-09-05"): 70.0}
-    rhr_map = {pd.Timestamp("2026-09-05"): 52.0}
     clean_full = _night(470, rem=105, deep=95, awake_segs=[1, 1])
     clean_short = _night(300, rem=68, deep=60, awake_segs=[1, 1])
     full = mx.sleep_score(clean_full, cfg.SLEEP_NEED_MIN)
@@ -135,7 +131,7 @@ def drinking_night_scores_far_below_seventy_six():
     settled, sparts = mx._sleep_settled(46.0, hrv_hist, 60.0, rhr_hist)
     assert settled is not None and settled < 0.35, settled
     night = _night(305, rem=58, deep=78, awake_segs=[6, 8, 5], latency=6.0)
-    score, parts, quality, durf = mx.sleep_score(
+    score, parts, quality, _ = mx.sleep_score(
         night, cfg.SLEEP_NEED_MIN, timing_dev=15.0,
         rem_base=rem_base, deep_base=deep_base,
         settled=settled, settled_parts=sparts)

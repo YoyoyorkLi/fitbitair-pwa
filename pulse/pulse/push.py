@@ -11,8 +11,8 @@ Runs from GitHub Actions hourly, and from a laptop for backfills. Idempotent:
 the primary key is the night, so re-pushing an overlapping range overwrites
 rather than duplicates.
 
-Credentials come from the environment. Locally that means web/.env.local, which
-is gitignored; in Actions they are repository secrets. The service_role key
+Credentials come from the environment. Locally that means .env.local at the
+repo root, which is gitignored; in Actions they are repository secrets. The service_role key
 bypasses RLS, which is why this never runs anywhere near a browser.
 """
 from __future__ import annotations
@@ -25,7 +25,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -62,20 +61,12 @@ def _load_local_env():
     """.env.local for laptop runs. Actions injects the same names directly.
 
     pulse/ is a subdirectory of the fitbitair-pwa repo -- the PWA half
-    (Vercel deploys from the repo root) and this half share one .env.local,
-    one level up from cfg.ROOT. Checked in order: that current layout first,
-    then two older ones (pulse as a sibling repo, and before that a nested
-    web/ dir) for anyone who hasn't re-synced past this move.
+    (Vercel deploys from the repo root) and this half share the one .env.local
+    at the repo root, one level up from cfg.ROOT.
     """
-    for p in (cfg.ROOT.parent / ".env.local",
-              cfg.ROOT.parent / "fitbitair-pwa" / ".env.local",
-              cfg.ROOT / "web" / ".env.local"):
-        try:
-            text = p.read_text()
-            break
-        except OSError:
-            continue
-    else:
+    try:
+        text = (cfg.ROOT.parent / ".env.local").read_text()
+    except OSError:
         return
     for raw in text.splitlines():
         line = raw.strip()
@@ -99,9 +90,9 @@ def _creds():
     if not url or not key:
         raise SystemExit(
             "Missing Supabase credentials.\n"
-            "  Local : fill SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in web/.env.local\n"
+            "  Local : fill SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local (repo root)\n"
             "  CI    : add them as repository secrets\n"
-            "See web/.env.example.")
+            "See .env.example.")
     return url, key
 
 
