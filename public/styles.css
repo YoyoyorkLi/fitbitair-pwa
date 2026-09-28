@@ -8,6 +8,7 @@
   --drink:#C4862E; --steps:#4FB8A8; --workout:#D65BA8;
   --sans:ui-sans-serif,-apple-system,"Segoe UI",system-ui,sans-serif;
   --tabbar-h:60px;
+  --top-gap:18px;
   color-scheme:dark;
 }
 *{box-sizing:border-box}
@@ -34,7 +35,13 @@ body{
 [hidden]{display:none!important}
 a{color:var(--accent)}
 
-.top{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:18px}
+.top{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:var(--top-gap)}
+/* Workouts, Drinks and Trends have no header row (the night selector is Day-only),
+   so their first card would sit hard against the status bar. The same gap the Day
+   page leaves between its header and its dials, on purpose this time: it used to
+   come from the hidden header's own margin, which was an accident and read as the
+   pages starting lower than Day's header. */
+#workouts,#drinks,#trends{padding-top:var(--top-gap)}
 
 /* Night selector. Meets Apple's 44px touch-target advice now that there is no
    brand wordmark left to crowd off a 320px screen for it. Arrow keys and the
