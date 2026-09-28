@@ -351,9 +351,9 @@ def normalize_exercise(points):
 
 def main_sleeps(nights):
     """One session per calendar day: the longest. Drops naps, which would
-    otherwise render as 'last night' and wreck every sleep metric -- but a
-    nap's minutes are still credited toward sleep debt and recovery via
-    nap_minutes() below."""
+    otherwise render as 'last night' and wreck every sleep metric. They are not
+    lost: nap_sessions() keeps them for the app to show, and nap_credit() lets
+    their minutes reach sleep DEBT -- and nothing else."""
     best = {}
     for n in nights:
         if n["asleep"] < cfg.MIN_MAIN_SLEEP_MIN:
@@ -367,8 +367,8 @@ def main_sleeps(nights):
 def nap_sessions(nights_all, mains):
     """Every session main_sleeps() rejected (too short, or the shorter of two on
     a day), oldest first. Sessions under 10 min are dropped as noise (a "21 min,
-    8 asleep" wake-up blip). The one definition of "a nap": nap_minutes() sums
-    it for the score maths and push.py stores it for the app to draw.
+    8 asleep" wake-up blip). The one definition of "a nap": push.py stores it
+    for the app to draw, and nap_minutes() sums it.
 
     Google Health also flags these itself (`metadata.nap`), but normalize_sleep()
     does not carry that through -- this rule reproduces it from the data pulse
@@ -383,15 +383,24 @@ def nap_minutes(nights_all, mains):
     """Total nap minutes per civil day, keyed by the day each nap STARTED on
     since a nap is a daytime event.
 
-    Naps do not get a sleep *score* -- that is one main night's architecture,
-    which a nap can't retroactively change -- but they genuinely lower sleep
-    pressure, so their minutes count toward `need` / debt / recovery.
+    A nap genuinely lowers sleep pressure, which is the case for letting these
+    minutes offset debt -- see nap_credit() for where that is, and is not, done.
     """
     out = {}
     for n in nap_sessions(nights_all, mains):
         d = n["start"].normalize()
         out[d] = out.get(d, 0.0) + float(n["asleep"])
     return out
+
+
+def nap_credit(nights_all, mains):
+    """The nap minutes sleep DEBT is allowed to see: nap_minutes() while
+    cfg.NAPS_COUNT_TOWARD_DEBT is on, nothing while it is off. Debt is the only
+    consumer -- sleep_series() keeps them out of the sleep score and out of
+    recovery's sleep term regardless. This is the single gate; render.py calls it
+    rather than nap_minutes() so the setting cannot be bypassed.
+    """
+    return nap_minutes(nights_all, mains) if cfg.NAPS_COUNT_TOWARD_DEBT else {}
 
 
 # ------------------------------------------------------------ heart / zones
@@ -650,11 +659,13 @@ def sleep_series(nights, strain_map, hrv_map=None, rhr_map=None, nap_min=None):
                  flat 7h night lands a clean 90 only when you're caught up.
     score        quality x fraction-of-score_target-slept (see sleep_score),
                  MAIN sleep only -- a nap doesn't change last night's shape.
-    perf         asleep_total / need, for recovery()'s sleep term -- naps count.
+    perf         asleep / need -- the main sleep ALONE -- for recovery()'s sleep
+                 term. Naps are left out on purpose: recovery is a morning read,
+                 and a 2pm nap should not rewrite how recovered you were at 7am.
 
-    nap_min: {civil_date -> minutes}, from nap_minutes(). Keyed to the wake
+    nap_min: {civil_date -> minutes}, from nap_credit(). Keyed to the wake
     date of the main sleep it lands on, so a 3pm nap credits the morning you
-    woke short.
+    woke short. It feeds asleep_total, and so DEBT, and nothing else.
     """
     hrv_map = hrv_map or {}
     rhr_map = rhr_map or {}
@@ -708,7 +719,7 @@ def sleep_series(nights, strain_map, hrv_map=None, rhr_map=None, nap_min=None):
         score, parts, quality, dur_factor = sleep_score(
             n, score_target, timing_dev, rem_base, deep_base,
             settled, settled_parts)
-        perf = min(1.0, asleep_total / max(need, 1.0))
+        perf = min(1.0, n["asleep"] / max(need, 1.0))     # main sleep alone: see docstring
 
         rows.append({"date": d, "start": n["start"], "end": n["end"],
                      "asleep": n["asleep"], "in_bed": n["in_bed"],

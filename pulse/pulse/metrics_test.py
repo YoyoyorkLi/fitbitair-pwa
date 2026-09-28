@@ -293,34 +293,62 @@ def nap_sessions_are_what_main_sleeps_rejects():
     assert one["stages"][0]["a"] == 0 and one["stages"][-1]["b"] > one["stages"][0]["b"], one["stages"]
 
 
-@case
-def naps_credit_debt_not_score():
-    """A nap cuts sleep debt and lifts recovery's perf term, but does not
-    touch the main night's sleep score."""
+def _nap_fixture():
+    """16 slightly-short nights and one 100-min nap on the afternoon of night 10."""
     base = pd.Timestamp("2026-08-20 23:15:00")
     nights_all, mains = [], []
     for i in range(16):
-        start = base + pd.Timedelta(days=i)
-        n = _night(395, rem=95, deep=75, awake_segs=[1], start=start)  # ~25 min short
+        n = _night(395, rem=95, deep=75, awake_segs=[1], start=base + pd.Timedelta(days=i))  # ~25 min short
         nights_all.append(n)
         mains.append(n)
-        if i == 10:                                   # a 100-min nap the afternoon
-            nap_start = n["end"].normalize() + pd.Timedelta(hours=14)   # of the wake day
-            nights_all.append(_night(100, rem=8, deep=20, awake_segs=[], start=nap_start))
+        if i == 10:
+            nights_all.append(_night(100, rem=8, deep=20, awake_segs=[],
+                                     start=n["end"].normalize() + pd.Timedelta(hours=14)))
+    return nights_all, mains
 
-    naps = mx.nap_minutes(nights_all, mains)
-    nap_day = mains[10]["end"].normalize()
-    assert naps.get(nap_day) == 100.0, naps
+
+@case
+def naps_count_toward_debt_and_nothing_else():
+    """Sleep debt is the ONE place a nap counts. It lowers debt (on the nap's day
+    and the days after). The night's own asleep minutes, the score of the night it
+    follows and recovery's sleep term (perf) are exactly what they would be with no
+    nap. The one knock-on: the score's duration target is need plus a slice of the
+    debt carried IN, so a nap that pays debt down relaxes that target for the
+    nights AFTER it -- it can raise their score, never lower it."""
+    nights_all, mains = _nap_fixture()
+    assert cfg.NAPS_COUNT_TOWARD_DEBT is True
+    naps = mx.nap_credit(nights_all, mains)
+    assert naps.get(mains[10]["end"].normalize()) == 100.0, naps
 
     no_nap = mx.sleep_series(mains, {}, None, None, None)
     with_nap = mx.sleep_series(mains, {}, None, None, naps)
-    # the nap night's score is unchanged (main sleep identical)...
-    assert no_nap["score"].iloc[10] == with_nap["score"].iloc[10]
-    # ...but debt on that night and the days after it is lower
-    assert with_nap["debt"].iloc[10] < no_nap["debt"].iloc[10] - 30
-    assert with_nap["debt"].iloc[13] < no_nap["debt"].iloc[13]
-    # and perf (the recovery input) rose
-    assert with_nap["perf"].iloc[10] > no_nap["perf"].iloc[10]
+
+    assert with_nap["debt"].iloc[10] < no_nap["debt"].iloc[10] - 30, "the nap pays down debt"
+    assert with_nap["debt"].iloc[13] < no_nap["debt"].iloc[13], "and keeps doing so afterwards"
+
+    assert (with_nap["asleep"] == no_nap["asleep"]).all(), "the night's duration never includes a nap"
+    assert (with_nap["score"].iloc[:11] == no_nap["score"].iloc[:11]).all(), "the nap night's own score is untouched"
+    assert (with_nap["score"].iloc[11:] >= no_nap["score"].iloc[11:]).all(), "later targets only relax"
+    assert (with_nap["perf"] == no_nap["perf"]).all(), "recovery's sleep term reads the main sleep alone"
+    assert with_nap["asleep_total"].iloc[10] == no_nap["asleep"].iloc[10] + 100, "asleep_total is what debt reads"
+
+
+@case
+def naps_can_be_kept_out_of_debt_too():
+    """cfg.NAPS_COUNT_TOWARD_DEBT is the switch: off, nap_credit() returns nothing
+    and debt is exactly what it would be had the nap never happened. The nap is
+    still found by nap_sessions()/nap_minutes(), so the app can still show it."""
+    nights_all, mains = _nap_fixture()
+    cfg.NAPS_COUNT_TOWARD_DEBT = False
+    try:
+        assert mx.nap_credit(nights_all, mains) == {}
+        assert mx.nap_minutes(nights_all, mains), "the nap is still a nap -- only its credit is withheld"
+        fed = mx.sleep_series(mains, {}, None, None, mx.nap_credit(nights_all, mains))
+        never = mx.sleep_series(mains, {}, None, None, None)
+        assert (fed["debt"] == never["debt"]).all()
+        assert (fed["asleep_total"] == fed["asleep"]).all()
+    finally:
+        cfg.NAPS_COUNT_TOWARD_DEBT = True
 
 
 @case

@@ -608,28 +608,31 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null,
   });
 
   // Sleep block lengths: the time asleep, written across the top of each block --
-  // "Sleep 7h 12m" on the night, "Nap 1h 31m" on a nap. The bands say WHEN and
-  // nothing says HOW LONG, and a tooltip is no answer on a phone (marks inside a
+  // the word ("Sleep", "Nap") over the duration. The bands say WHEN and nothing
+  // said HOW LONG, and a tooltip is no answer on a phone (marks inside a
   // scrubbable chart are excluded from it). Drawn after the curve so the line
   // never runs through the text.
   //
-  // Fit is estimated, not measured -- there is no DOM here to measure with: about
-  // 5.2px a character at 9px. The word goes first and is the first thing dropped
-  // when a block is too narrow; a nap only ~40px wide keeps just its duration. A
+  // Stacked, not run together on one line, so the word survives a narrow block:
+  // on a phone a 3-hour nap is ~40px wide, which fits "2h 26m" but not "Nap 2h
+  // 26m" -- and a bare duration on one block beside "Sleep 7h 12m" on the other
+  // left the nap unnamed. Both blocks now read the same way at any width.
+  //
+  // Fit is estimated, not measured -- there is no DOM here to measure with. A
   // duration wider than its block is still written, centred on it and clamped
   // inside the plot, since a label a few pixels wider than a short block reads
   // fine and no label at all reads as a block with no length. A label that would
   // land on the previous one is skipped instead of smeared over it.
-  const LBL = 9, CW = 5.2;
+  const CW = 5.6;
   let lblRight = -1e9;
   for (const blk of blocks.sort((u, v) => u.xs - v.xs)) {
-    const len = dur(blk.minutes), room = blk.xe - blk.xs - 6;
-    const text = (blk.word.length + 1 + len.length) * CW <= room ? `${blk.word} ${len}` : len;
-    const half = (text.length * CW) / 2;
+    const len = dur(blk.minutes);
+    const half = (Math.max(len.length, blk.word.length) * CW) / 2;
     const cx = Math.min(Math.max((blk.xs + blk.xe) / 2, x0 + half), x1 - half);
     if (cx - half < lblRight + 4) continue;
     lblRight = cx + half;
-    p += txt(cx, y0 + 14, text, { size: LBL, anchor: "middle", fill: "text", weight: 600 });
+    p += txt(cx, y0 + 12, blk.word, { size: 8.5, anchor: "middle", fill: "muted", weight: 600 });
+    p += txt(cx, y0 + 25, len, { size: 9.5, anchor: "middle", fill: "text", weight: 700 });
   }
 
   // Hit bands are on the same time scale as everything else, so they stay

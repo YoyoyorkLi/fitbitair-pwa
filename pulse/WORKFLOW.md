@@ -555,8 +555,10 @@ Health app; on top of that the hourly push, and Google's own processing lag.
 The PWA header shows how stale the last sync is and turns amber past ~100 min.
 
 **Naps don't become "last night".** A session under 3 hours is never scored as
-the main sleep — but its minutes still credit sleep debt and recovery, keyed
-to the day you woke. The Air only detects a nap after ~45 min of stillness.
+the main sleep. It is stored and shown as a nap on the day it started; its
+minutes count toward sleep debt and nothing else — not the night, the score's
+night, or recovery (`NAPS_COUNT_TOWARD_DEBT` in `config.py`). The Air only
+detects a nap after ~45 min of stillness.
 
 **Recovery needs history.** Z-scores need at least five prior days. Before that
 it sits near neutral by design, not by accident.

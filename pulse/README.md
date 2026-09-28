@@ -45,7 +45,7 @@ How each is calculated — with the constants and the research behind them — i
   rejects is skipped, not fatal.
 - **Degrades gracefully.** Missing HRV, missing resting HR, CLASSIC-only sleep,
   no skin temperature and single-night histories all compute rather than crash.
-- **Naps** (< 3 h) don't masquerade as last night, but their minutes still
-  credit sleep debt and recovery.
+- **Naps** (< 3 h) don't masquerade as last night. They are stored and shown
+  separately, and their minutes count toward sleep debt and nothing else.
 - **No dependencies beyond numpy and pandas.** OAuth is hand-rolled stdlib.
 - **Python 3.9+**, which is what macOS ships.

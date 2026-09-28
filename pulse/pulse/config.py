@@ -90,6 +90,18 @@ TIMEZONE = os.getenv("PULSE_TZ") or None
 # Sleep sessions shorter than this are naps, not the main sleep.
 MIN_MAIN_SLEEP_MIN = 180
 
+# Do a nap's minutes count toward SLEEP DEBT? ON -- and debt is the only place
+# they count. Naps are never added to the night's duration, never in the sleep
+# score, never in recovery's sleep term; they are stored and shown as their own
+# thing (nights.naps, the app's nap bar and blocks). Debt is sleep owed against
+# sleep had, and a nap is sleep had. WHOOP draws the same line: naps stay out of
+# its Sleep Performance and Recovery, and can reduce sleep debt.
+# 1-for-1 is generous: on a live account one 2.5h afternoon nap took a ~2h debt
+# to zero, and the research is that naps ease acute debt without fully replacing
+# night sleep. Off makes debt ignore naps entirely. Either way, stored history is
+# only restated as far back as a sync rewrites: run the workflow with full=true.
+NAPS_COUNT_TOWARD_DEBT = True
+
 # ---- Google Health API -------------------------------------------------
 API_ROOT = "https://health.googleapis.com/v4"
 CLIENT_ID = os.getenv("GH_CLIENT_ID", "")

@@ -89,10 +89,11 @@ function loadBar(t) {
 // filed under the civil day they started on, which is the row (D.dates[i]) whose
 // Day tab shows that afternoon.
 //
-// Where they count is decided in metrics.py, not here: they lower sleep debt and
-// lift recovery's sleep term, and are NOT part of the Sleep Score (a nap cannot
-// change last night's architecture). The Sleep detail says so, because a nap
-// that appears without moving the score would otherwise look like a bug.
+// Naps are kept apart from sleep: nothing here adds a nap's minutes to the
+// night's. metrics.py counts them toward sleep debt and nothing else -- not the
+// night, its score, or recovery (cfg.NAPS_COUNT_TOWARD_DEBT). The Sleep detail
+// says so, because a nap that appears without moving the score would otherwise
+// look like a bug.
 const napTime = (n) => `${ch.clock12(ch.mins(n.start))} – ${ch.clock12(ch.mins(n.end))}`;
 // "46m" under an hour, "2h 26m" over -- hm() alone reads "0h 46m".
 const shortDur = (m) => (m < 60 ? `${Math.round(m)}m` : hm(m));
@@ -121,7 +122,7 @@ function napCards(naps) {
     const parts = [`<b>${shortDur(n.min)}</b> asleep of ${shortDur(n.in_bed)} in bed`];
     if (hyp) parts.push(`deep ${shortDur(stageMin(n, "DEEP"))}`, `REM ${shortDur(stageMin(n, "REM"))}`);
     return card(`Nap — ${napTime(n)}`, ch.hypnogram(W, hyp, 200), parts.join(" · "));
-  }).join("") + `<p class="note" style="margin:-4px 2px 16px">Naps are not part of the Sleep Score — that judges one night. Their minutes do count toward sleep debt and recovery.</p>`;
+  }).join("") + `<p class="note" style="margin:-4px 2px 16px">Naps are shown on their own — they are not part of your sleep time, Sleep Score or recovery. Their minutes do count toward sleep debt.</p>`;
 }
 
 // Scrubbable charts get a readout row between the title and the chart: the
@@ -1913,8 +1914,7 @@ function renderWorkoutsTab(D) {
     <div class="calgrid">
       ${CAL_WEEKDAYS.map((d) => `<div class="calhead">${d}</div>`).join("")}
       ${cells}
-    </div>
-    <p class="note" style="margin-top:14px">Days outlined in teal had a workout — tap one to see it.</p>`;
+    </div>`;
 }
 
 // Own month cursor, independent of calYear/calMonth above -- browsing March

@@ -90,7 +90,7 @@ def compute(con=None):
             hr_all = hr_all[hr_all["day"] > cut]
     strain_df = strain_df.drop(columns=["n"])
 
-    naps = mx.nap_minutes(nights_all, nights)
+    naps = mx.nap_credit(nights_all, nights)   # sleep debt only; {} if cfg.NAPS_COUNT_TOWARD_DEBT is off
     sf = mx.sleep_series(nights, dict(zip(strain_df["date"], strain_df["strain"])),
                          hrv_map, rhr_map, naps)
 

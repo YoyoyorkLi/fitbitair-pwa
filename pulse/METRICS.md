@@ -75,20 +75,36 @@ Why this shape (RISE's model + the chronic-sleep-restriction literature):
 ### Naps
 
 `main_sleeps()` keeps one session per day (the longest) so a nap can't render
-as "last night" and wreck the stage numbers. But `nap_minutes()` collects every
-session it rejected — keyed to the civil day it started — and those minutes
-**do** count:
+as "last night" and wreck the stage numbers. Everything it rejects is a nap —
+`nap_sessions()` — and naps are **kept separate from sleep**, with one exception:
 
-- added to `asleep_total`, which is what **sleep debt** and **`perf`** (the
-  recovery sleep term) are computed from. A 90-min nap offsets 90 min of that
-  day's shortfall.
-- **not** added to the sleep **score** — that's one main night's architecture,
-  which a nap can't retroactively change.
+- **stored and shown.** Each nap is stored on its civil day (`nights.naps`) and
+  the app draws it: the nap bar, its own hypnogram, a labelled block on the
+  heart-rate chart. Its length is never added to the night's.
+- **never added to the night.** The night's duration, its stages, its sleep score
+  and recovery's sleep term (`perf`) read the main sleep alone. Recovery is a
+  morning read; a 2 pm nap shouldn't rewrite how recovered you were at 7 am.
+- **counted in sleep debt — and only there.** `nap_credit()` is the single gate,
+  and `NAPS_COUNT_TOWARD_DEBT` in `config.py` (on) lets a nap's minutes into
+  `asleep_total`, which is what debt is computed from. A 90-min nap offsets 90 min
+  of that day's shortfall. Debt is sleep owed against sleep had, and a nap is
+  sleep had. (WHOOP's own help draws the same line: naps stay out of its Sleep
+  Performance and Recovery, and can reduce sleep debt.)
+
+One knock-on, by design: the score's duration target is need plus a slice of the
+debt you carry *in* (see Sleep score), so a nap that pays debt down relaxes the
+target for the nights after it. It never changes the score of the night it
+follows, and it can only raise later scores, never lower them.
+
+1-for-1 is generous. The research is that a nap eases acute debt without fully
+replacing night sleep, and on a live account one 2.5 h afternoon nap took a ~2 h
+debt to zero. Set `NAPS_COUNT_TOWARD_DEBT = False` to make debt ignore naps
+entirely; either way, stored history is only restated as far back as a sync
+rewrites, so run the workflow with `full: true` after changing it.
 
 Sessions under 10 min are dropped (a "21 min, 8 asleep" wake-up blip is noise).
 The Fitbit Air only logs a nap it detects — roughly 45 min+ of sustained
-stillness — so short couch naps are invisible to this and simply don't get
-credited.
+stillness — so short couch naps are invisible to this and don't appear at all.
 
 ## Sleep score
 
