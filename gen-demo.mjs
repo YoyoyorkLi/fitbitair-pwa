@@ -426,6 +426,36 @@ S.debt[LAST] = Math.round(clamp(
   S.target[LAST] = r1(6 + 0.09 * S.recovery[LAST]);
 }
 
+// ---- naps ---------------------------------------------------------------
+// Sessions that are not the day's main sleep, filed under the civil day they
+// started on -- the shape push.py stores in `nights.naps`: clock start/end, the
+// minutes asleep, the minutes in bed, and stage offsets from the nap's own start.
+// Its OWN rng stream, seeded apart from the one above, so adding naps did not
+// move a single other number in this file.
+const napRng = mulberry32(20260927);
+const nrand = (lo, hi) => lo + (hi - lo) * napRng();
+function napFor(startMin, inBed) {
+  const segs = [];
+  let at = 0;
+  const push = (t, len) => { len = Math.max(1, Math.round(len)); segs.push({ t, a: at, b: at + len }); at += len; };
+  push("AWAKE", nrand(3, 8));
+  push("LIGHT", inBed * nrand(0.25, 0.35));
+  push("DEEP", inBed * nrand(0.15, 0.25));
+  push("LIGHT", inBed * nrand(0.15, 0.25));
+  if (inBed >= 70) push("REM", inBed * nrand(0.08, 0.15));
+  push("LIGHT", Math.max(1, inBed - at - 3));
+  if (at < inBed) push("AWAKE", inBed - at);
+  const asleep = segs.reduce((s, x) => (x.t === "AWAKE" ? s : s + (x.b - x.a)), 0);
+  return { start: hhmm(startMin), end: hhmm(startMin + at), min: asleep, in_bed: at, stages: segs };
+}
+// The newest day always has one, so the demo opens on it; older days have one
+// every seventh night, at varying hours and lengths.
+const NAP_LAST_START = 14 * 60 + 10;
+const nap_nights = dates.map((_, i) =>
+  i === LAST ? [napFor(NAP_LAST_START, 100)]
+    : i % 7 === 3 ? [napFor(Math.round(nrand(13 * 60, 16 * 60)), Math.round(nrand(45, 130)))]
+    : []);
+
 // ---- the newest night's civil-day heart-rate curve (00:00-24:00) ----------
 // Phases across the day. bpm is a smooth base per phase plus small noise.
 function bpmAt(min) {                                       // min 0..1440
@@ -454,7 +484,15 @@ function bpmAt(min) {                                       // min 0..1440
   return 100 - 22 * p + jitter();
 }
 const curve = [];
-for (let m = 0; m < 1440; m += 5) curve.push([hhmm(m), clamp(Math.round(bpmAt(m)), 44, 165)]);
+// The nap is asleep, so the curve drops into a sleeper's range for its window.
+// bpmAt() is still called there and its value discarded: every call advances
+// the rng, and skipping them would shift every jitter after the nap.
+const napEnd = NAP_LAST_START + nap_nights[LAST][0].in_bed;
+for (let m = 0; m < 1440; m += 5) {
+  let v = bpmAt(m);
+  if (m >= NAP_LAST_START && m < napEnd) v = 60 + 3 * Math.sin(m / 9);
+  curve.push([hhmm(m), clamp(Math.round(v), 44, 165)]);
+}
 
 // ---- assemble -----------------------------------------------------------
 const today = {
@@ -484,7 +522,7 @@ const out = {
   steps: S.steps, drinks: S.drinks, hrmax: 192,
   curve, hypno, today,
   // per-night detail so the calendars aren't a single lit cell
-  drink_times_nights, drink_rows_nights, workout_nights,
+  drink_times_nights, drink_rows_nights, workout_nights, nap_nights,
   // newest-night singulars, kept for older code paths / self-documentation
   drink_times, workout_list, first_drink, last_drink, drink_rows,
   dates_labels: dates.map((d) => d.slice(5)),

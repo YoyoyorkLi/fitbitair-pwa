@@ -269,6 +269,31 @@ def recovery_load_deep_lens():
 
 
 @case
+def nap_sessions_are_what_main_sleeps_rejects():
+    """The naps push.py stores for the app are exactly the sessions main_sleeps()
+    rejects and nap_minutes() sums -- one definition, so what the app draws is
+    what debt was credited for. A wake-up blip under 10 min is neither."""
+    from . import push
+
+    night = _night(420, rem=95, deep=75, awake_segs=[1], start=pd.Timestamp("2026-08-20 23:15:00"))
+    day = night["end"].normalize()
+    nap = _night(100, rem=8, deep=20, awake_segs=[], start=day + pd.Timedelta(hours=14))
+    blip = _night(8, rem=0, deep=0, awake_segs=[], start=day + pd.Timedelta(hours=18))
+    nights_all = [night, nap, blip]
+    mains = mx.main_sleeps(nights_all)
+
+    assert mains == [night], "the 420-min night is the only main sleep"
+    assert mx.nap_sessions(nights_all, mains) == [nap], "the blip is dropped, the nap kept"
+    assert mx.nap_minutes(nights_all, mains) == {day: 100.0}
+
+    stored = push._daily_naps({"nights_all": nights_all, "nights": mains})
+    assert list(stored) == [day.date()], stored.keys()
+    (one,) = stored[day.date()]
+    assert one["start"] == "14:00" and one["min"] == 100, one
+    assert one["stages"][0]["a"] == 0 and one["stages"][-1]["b"] > one["stages"][0]["b"], one["stages"]
+
+
+@case
 def naps_credit_debt_not_score():
     """A nap cuts sleep debt and lifts recovery's perf term, but does not
     touch the main night's sleep score."""

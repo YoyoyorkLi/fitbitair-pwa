@@ -82,6 +82,48 @@ function loadBar(t) {
   return `<button type="button" class="loadbar l${s}" data-detail="recovery">
     <span class="lb-dot"></span><span class="lb-txt">Recovery load: <b>${LOAD_WORD[s]}</b>${why}${drink}</span></button>`;
 }
+// ------------------------------------------------------------------- naps
+// A nap is a sleep session that is not the day's main sleep. push.py stores it
+// in the same shape as a night -- clock start/end, minutes asleep, stage offsets
+// from its own start -- so it draws with the night's own hypnogram. Naps are
+// filed under the civil day they started on, which is the row (D.dates[i]) whose
+// Day tab shows that afternoon.
+//
+// Where they count is decided in metrics.py, not here: they lower sleep debt and
+// lift recovery's sleep term, and are NOT part of the Sleep Score (a nap cannot
+// change last night's architecture). The Sleep detail says so, because a nap
+// that appears without moving the score would otherwise look like a bug.
+const napTime = (n) => `${ch.clock12(ch.mins(n.start))} – ${ch.clock12(ch.mins(n.end))}`;
+// "46m" under an hour, "2h 26m" over -- hm() alone reads "0h 46m".
+const shortDur = (m) => (m < 60 ? `${Math.round(m)}m` : hm(m));
+const stageMin = (n, type) => (n.stages || []).filter((s) => s.t === type).reduce((a, s) => a + s.b - s.a, 0);
+// Same object hypnoFrom() builds for a night, minus the heart-rate floor: that is
+// a whole-night measure and means nothing over a two-hour nap.
+const napHypno = (n) => n.stages?.length
+  ? { start: n.start, span: Math.max(...n.stages.map((s) => s.b)), segs: n.stages, nadirMin: NaN, nadirBpm: NaN }
+  : null;
+
+// One line on the Day tab, under the dials, in the loadbar's own idiom. Taps
+// into the Sleep detail where the naps are drawn.
+function napBar(naps) {
+  if (!naps.length) return "";
+  const total = naps.reduce((a, n) => a + n.min, 0);
+  const what = naps.length === 1 ? `Nap <b>${napTime(naps[0])}</b>` : `<b>${naps.length} naps</b>`;
+  return `<button type="button" class="loadbar nap" data-detail="sleep">
+    <span class="lb-dot"></span><span class="lb-txt">${what} · ${shortDur(total)} asleep</span></button>`;
+}
+
+// One card per nap, then a single line on how they are counted.
+function napCards(naps) {
+  if (!naps.length) return "";
+  return naps.map((n) => {
+    const hyp = napHypno(n);
+    const parts = [`<b>${shortDur(n.min)}</b> asleep of ${shortDur(n.in_bed)} in bed`];
+    if (hyp) parts.push(`deep ${shortDur(stageMin(n, "DEEP"))}`, `REM ${shortDur(stageMin(n, "REM"))}`);
+    return card(`Nap — ${napTime(n)}`, ch.hypnogram(W, hyp, 200), parts.join(" · "));
+  }).join("") + `<p class="note" style="margin:-4px 2px 16px">Naps are not part of the Sleep Score — that judges one night. Their minutes do count toward sleep debt and recovery.</p>`;
+}
+
 // Scrubbable charts get a readout row between the title and the chart: the
 // values land THERE rather than in a bubble under your thumb. On a phone the
 // floating tooltip was the whole problem -- the finger covers the number it
@@ -605,6 +647,8 @@ function normalize(D) {
   D.workouts ??= D.workout_nights
     ? D.workout_nights.map((v) => v || [])
     : only(D.workout_list || []).map((v) => v || []);
+  // A fixture from before naps existed has no nap_nights: no naps, not an error.
+  D.naps ??= D.nap_nights ? D.nap_nights.map((v) => v || []) : D.dates.map(() => []);
 
   for (const k of ["inBed", "need", "hrvBaseline", "bodyLoad", "loadState",
                    "skinTempDelta", "respRate", "respRateDelta", "rhrDelta",
@@ -652,7 +696,7 @@ function trimInProgressNight(D) {
                    "steps", "drinks", "target", "curves", "hypnos",
                    "bodyLoad", "loadState", "skinTempDelta", "respRate", "respRateDelta", "rhrDelta",
                    "hrvDeep", "hrvDeepBaseline", "hrvDeepPct", "nonRemHr", "spo2Min",
-                   "workouts", "drinkTimes", "drinkRows",
+                   "workouts", "naps", "drinkTimes", "drinkRows",
                    "nightRows", "nightTimes", "nightFirst", "nightLast"]) {
     if (Array.isArray(D[k])) D[k].pop();
   }
@@ -727,6 +771,9 @@ async function loadLive() {
     curves: data.map((r) => (Array.isArray(r.hr_curve) ? r.hr_curve : [])),
     hypnos: data.map(hypnoFrom),
     workouts: data.map((r) => (Array.isArray(r.workouts) ? r.workouts : [])),
+    // Naps that started that civil day (push.py's `naps` column). Absent from a
+    // row synced before migration 003, hence the guard rather than an assumption.
+    naps: data.map((r) => (Array.isArray(r.naps) ? r.naps : [])),
     drinkTimes: data.map(() => []),
     drinkRows: data.map(() => []),
   };
@@ -1150,6 +1197,7 @@ function renderDay() {
       ${kpi(ch.ring(t.score, ok(t.score) && t.score >= 80 ? col("good") : col("awake"), "Sleep Score", ok(t.score) ? `Sleep Score ${t.score}|how well + how settled, scaled to how long you slept vs what you needed — more when you're carrying sleep debt` : "No sleep recorded|this night has not been scored"), "Sleep Score", ok(t.asleep) ? hm(t.asleep) : "not yet", "sleep")}
     </div>
     ${loadBar(t)}
+    ${napBar(D.naps[i] || [])}
     ${strip}
     <div class="card"><div class="stats">
       ${stat(ok(t.hrv) ? t.hrv : "—", "HRV ms", recCol)}${stat(ok(t.rhr) ? t.rhr : "—", "RHR bpm")}
@@ -1167,6 +1215,8 @@ function renderDay() {
         // evening before, so its "start" clock time typically needs to read
         // as yesterday relative to this chart. See nightSpan() in charts.js.
         sleep: showSleep && D.hypnos[i] ? { start: D.hypnos[i].start, min: D.hypnos[i].span } : null,
+        // The Sleep chip is "when was I asleep", so a nap is part of it.
+        naps: showSleep ? (D.naps[i] || []) : [],
       }),
       // The workout bands carry no spelled-out on-chart label any more -- two
       // sessions an hour apart overlapped into a smear. Each band gets a
@@ -1804,6 +1854,7 @@ function renderDetailBody(kind) {
       ${stat(ok(sn.need) ? hm(sn.need) : "—", "Needed last night")}${stat(ok(sn.score) ? sn.score : "—", "Sleep Score", sn.score >= 80 ? col("good") : col("awake"))}
     </div>${debtBump > 5 ? `<p class="note">Scored against <b>${hm(sn.scoreTarget)}</b> — your ${hm(sn.need)} need plus <b>${hm(debtBump)}</b> because you went in carrying sleep debt. Sleep long or pay the debt down and the same night scores higher.</p>` : ok(tonightNeed) ? `<p class="note">Needed tonight: <b>${hm(tonightNeed)}</b> — a flat 7h baseline${tonightNeed > NEED_MIN ? ", plus a little for today's exertion" : ""}. Carrying debt raises the bar the score is measured against; your 8h goal is the stretch target.</p>` : ""}</div>
     ${card("Hypnogram", ch.hypnogram(W, hyp))}
+    ${napCards(D.naps[i] || [])}
     ${card("Heart rate during sleep", ch.hrIntraday(W, { curve: sleepHrCurve(D, sIdx, hyp), hrmax: D.hrmax, rhr: sn.rhr }))}
     ${card(`REM — ${remDays} nights`, ch.sparkline(W, D, D.rem, col("rem"), remDays, "min"))}
     ${card("Stages vs your 30-night baseline", ch.stagesVsBaseline(W, D, sn), "", false)}
@@ -1989,6 +2040,10 @@ for (const btn of document.querySelectorAll(".tab")) {
     // "which date" control on Workouts.
     $("daynav").hidden = btn.dataset.tab !== "today";
     tip.hidden = true;
+    // The tabs used to sit at the top of the page, so reaching them meant the
+    // page was already at scroll 0. At the bottom they can be tapped from deep
+    // in a long tab, and the new one would open scrolled to wherever that was.
+    scrollTo(0, 0);
     if (btn.dataset.tab === "drinks") refreshTonight();
   });
 }

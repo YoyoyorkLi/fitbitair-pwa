@@ -424,7 +424,7 @@ function nightSpan(start, minutes, tLo) {
   return [e - minutes, e];
 }
 
-export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null, hrmax, rhr, session = false }) {
+export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null, naps = [], hrmax, rhr, session = false }) {
   // y0 is set well below the top edge to leave a margin for the marker tags
   // that float above the plot: two staggered rows of workout badges, then two
   // staggered rows of drink badges below them, four rows in all.
@@ -472,6 +472,18 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null,
       p += `<rect x="${xs.toFixed(1)}" y="${y0}" width="${Math.max(xe - xs, 1.5).toFixed(1)}" height="${y1 - y0}"
         fill="${col("rem")}" opacity=".18" data-tip="${esc(`Asleep|${clock12(s)}–${clock12(e)}`)}"/>`;
     }
+  }
+
+  // Naps: the same wash as the night, since both are "asleep". A nap starts on
+  // this chart's own civil day, so unroll() places it the way it does a workout;
+  // nightSpan() is only for a night whose bedtime falls BEFORE the chart starts.
+  // The length is time in bed: start + in_bed is the session's end.
+  for (const n of naps) {
+    const s = unroll([n.start], tLo)[0], e = s + (Number(n.in_bed) || Number(n.min) || 0);
+    if (e < tLo || s > tHi) continue;
+    const xs = X(Math.max(s, tLo)), xe = X(Math.min(e, tHi));
+    p += `<rect x="${xs.toFixed(1)}" y="${y0}" width="${Math.max(xe - xs, 1.5).toFixed(1)}" height="${y1 - y0}"
+      fill="${col("rem")}" opacity=".18" data-tip="${esc(`Nap|${clock12(s)}–${clock12(e)}`)}"/>`;
   }
 
   // Workout overlay: a translucent full-height band over each session's own
@@ -629,7 +641,7 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null,
     p += txt(X(m), yAxis, short ? clock12(m) : tick12(m), { size: 9.5, anchor });
   });
   p += scrubLayer(y0, y1);
-  const descParts = ["zone bands", "drink markers", sleep && "sleep window", workouts.length && "workout times"].filter(Boolean);
+  const descParts = ["zone bands", "drink markers", (sleep || naps.length) && "sleep window", workouts.length && "workout times"].filter(Boolean);
   const desc = descParts.length > 1
     ? `${descParts.slice(0, -1).join(", ")} and ${descParts[descParts.length - 1]}`
     : descParts[0];

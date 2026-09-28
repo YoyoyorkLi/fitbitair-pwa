@@ -364,21 +364,31 @@ def main_sleeps(nights):
     return [best[k] for k in sorted(best)]
 
 
+def nap_sessions(nights_all, mains):
+    """Every session main_sleeps() rejected (too short, or the shorter of two on
+    a day), oldest first. Sessions under 10 min are dropped as noise (a "21 min,
+    8 asleep" wake-up blip). The one definition of "a nap": nap_minutes() sums
+    it for the score maths and push.py stores it for the app to draw.
+
+    Google Health also flags these itself (`metadata.nap`), but normalize_sleep()
+    does not carry that through -- this rule reproduces it from the data pulse
+    already has, and it agrees on every session of a live account.
+    """
+    main_keys = {(m["start"], m["end"]) for m in mains}
+    return [n for n in nights_all
+            if (n["start"], n["end"]) not in main_keys and n["asleep"] >= 10]
+
+
 def nap_minutes(nights_all, mains):
-    """Total nap minutes per civil day -- every session main_sleeps() rejected
-    (too short, or the shorter of two on a day), keyed by the day it STARTED
-    on since a nap is a daytime event.
+    """Total nap minutes per civil day, keyed by the day each nap STARTED on
+    since a nap is a daytime event.
 
     Naps do not get a sleep *score* -- that is one main night's architecture,
     which a nap can't retroactively change -- but they genuinely lower sleep
-    pressure, so their minutes count toward `need` / debt / recovery. Sessions
-    under 10 min are dropped as noise (a "21 min, 8 asleep" wake-up blip).
+    pressure, so their minutes count toward `need` / debt / recovery.
     """
-    main_keys = {(m["start"], m["end"]) for m in mains}
     out = {}
-    for n in nights_all:
-        if (n["start"], n["end"]) in main_keys or n["asleep"] < 10:
-            continue
+    for n in nap_sessions(nights_all, mains):
         d = n["start"].normalize()
         out[d] = out.get(d, 0.0) + float(n["asleep"])
     return out

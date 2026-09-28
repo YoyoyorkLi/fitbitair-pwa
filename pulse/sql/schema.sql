@@ -220,6 +220,13 @@ create table public.nights (
   -- Null on a day with none, same convention as steps for "nothing yet".
   workouts        jsonb,
 
+  -- Naps that started this civil day: every sleep session that is not the day's
+  -- main sleep (>= 10 min asleep), from the same Google Health "sleep" data type.
+  --   [{"start":"13:31","end":"16:21","min":146,"in_bed":170,"stages":[...]}, ...]
+  -- stages are minute offsets from the nap's own start, same shape as `stages`.
+  -- Null on a day with none. Migration 003 adds this to an existing database.
+  naps            jsonb,
+
   updated_at      timestamptz not null default now()
 );
 
@@ -356,7 +363,10 @@ select
   n.spo2_min,
   case when n.spo2 is not null and n.spo2_min is not null
        then round((n.spo2 - n.spo2_min)::numeric, 1) end as spo2_drop,
-  n.spo2_sd
+  n.spo2_sd,
+
+  -- Naps (migration 003). Appended at the END, same rule as above.
+  n.naps
 from public.nights n
 full outer join (
   select night,

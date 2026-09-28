@@ -7,6 +7,7 @@
   --strain:#2FD4C6; --good:#3FD68A; --warn:#F2545B; --accent:#5B8DEF;
   --drink:#C4862E; --steps:#4FB8A8; --workout:#D65BA8;
   --sans:ui-sans-serif,-apple-system,"Segoe UI",system-ui,sans-serif;
+  --tabbar-h:60px;
   color-scheme:dark;
 }
 *{box-sizing:border-box}
@@ -16,10 +17,13 @@ body{
   padding:max(22px,env(safe-area-inset-top)) 16px max(40px,env(safe-area-inset-bottom));
 }
 .screen{max-width:760px;margin:0 auto}
+/* The fixed tab bar sits over the bottom of the page; leave room for it, plus
+   the home-indicator inset it grows by, so the last card is never under it. */
+#dash{padding-bottom:calc(var(--tabbar-h) + env(safe-area-inset-bottom))}
 [hidden]{display:none!important}
 a{color:var(--accent)}
 
-.top{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:14px}
+.top{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:18px}
 
 /* Night selector. Meets Apple's 44px touch-target advice now that there is no
    brand wordmark left to crowd off a 320px screen for it. Arrow keys and the
@@ -55,11 +59,45 @@ a{color:var(--accent)}
    working regardless of whether the sync does. */
 .daynav.stale .stamp{color:var(--awake)}
 
-.tabs{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap}
-.tab{background:var(--panel);border:1px solid var(--grid);color:var(--muted);border-radius:999px;
-     padding:9px 14px;font:inherit;font-size:14px;cursor:pointer}
-.tab[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--bg);font-weight:600}
+/* Bottom tab bar: four equal cells, an icon over a label. Fixed to the viewport
+   rather than the 760px column, then capped to that column's width and centred,
+   so on a desktop window it stays phone-shaped like .picker does. Its own bottom
+   padding is the home-indicator inset, so the cells keep their full height and
+   the bar just grows underneath them. z-index 15 sits under the pastbar (20) and
+   every .detail overlay (25/30), which cover it on purpose.
+   Translucent with a blur so a card scrolling under it is softened rather than
+   cut off by a hard edge; the alpha is high enough that the labels never sit on
+   a busy chart line. Browsers without backdrop-filter get the same colour at
+   near-full opacity, which is just a solid bar. */
+.tabs{
+  position:fixed;left:0;right:0;bottom:0;z-index:15;
+  max-width:760px;margin:0 auto;
+  display:grid;grid-template-columns:repeat(4,1fr);
+  background:rgba(20,25,36,.94);
+  -webkit-backdrop-filter:blur(16px) saturate(1.3);backdrop-filter:blur(16px) saturate(1.3);
+  border-top:1px solid var(--grid);
+  padding-bottom:env(safe-area-inset-bottom);
+}
+.tab{position:relative;height:var(--tabbar-h);padding:6px 4px 0;
+     display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+     background:none;border:0;border-radius:0;color:var(--dim);
+     font:inherit;font-size:10.5px;font-weight:500;letter-spacing:.03em;line-height:1;
+     cursor:pointer;-webkit-tap-highlight-color:transparent;transition:color .15s}
+.tab svg{width:23px;height:23px;display:block}
+/* Dividers: equal, but inset to the middle of the cell rather than running the
+   full height, so the bar reads as one surface with four stops on it and not as
+   four boxes. */
+.tab + .tab::before{content:"";position:absolute;left:0;top:14px;bottom:10px;width:1px;background:var(--grid)}
+.tab:active{color:var(--muted)}
+.tab[aria-selected="true"]{color:var(--accent);font-weight:600}
+/* The selected marker: a short bar hung from the bar's top edge, centred on the
+   cell. It moves with the selection, which is the whole "where am I" signal --
+   the colour change alone is easy to miss on a dark screen at arm's length. */
+.tab[aria-selected="true"]::after{content:"";position:absolute;top:-1px;left:50%;width:30px;height:3px;
+  margin-left:-15px;border-radius:0 0 3px 3px;background:var(--accent)}
 .tab:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* Inside the cell, or the fixed bar's edges clip the ring. */
+.tab:focus-visible{outline-offset:-4px}
 
 /* The Trends range toggle: smaller and quieter than .tab, since it governs
    the cards below it rather than switching the whole screen. */
@@ -105,6 +143,10 @@ a{color:var(--accent)}
 .loadbar.l2 .lb-dot{background:var(--warn)}
 .loadbar.l0{border-left-color:var(--good)}
 .loadbar.l0 .lb-dot{background:var(--good)}
+/* The nap bar shares the loadbar's layout; purple is sleep everywhere else in
+   the app (REM, the sleep-window wash), so a nap wears it too. */
+.loadbar.nap{border-left-color:var(--rem)}
+.loadbar.nap .lb-dot{background:var(--rem)}
 .loadcard.l1{border-left:2px solid var(--awake)}
 .loadcard.l2{border-left:2px solid var(--warn)}
 .loadcard.l0{border-left:2px solid var(--good)}

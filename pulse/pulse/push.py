@@ -270,6 +270,26 @@ def _daily_workouts(con):
     return out
 
 
+def _daily_naps(D):
+    """Naps grouped by the civil day they started on -- the same convention as
+    nap_minutes() and _daily_workouts(), so a row's `naps` lines up with the
+    minutes already credited to its sleep debt.
+
+    Each carries its own hypnogram in the same minute-offset form as `stages`,
+    so the app draws a nap with the chart it draws a night with.
+    """
+    out = {}
+    for n in mx.nap_sessions(D["nights_all"], D["nights"]):
+        out.setdefault(n["start"].date(), []).append({
+            "start": n["start"].strftime("%H:%M"),
+            "end": n["end"].strftime("%H:%M"),
+            "min": int(round(n["asleep"])),
+            "in_bed": int(round(n["in_bed"])),
+            "stages": _stages(n),
+        })
+    return out
+
+
 def _hist(series, upto, days=None):
     """The trailing values in the baseline window, excluding the night itself."""
     days = days or cfg.BASELINE_DAYS
@@ -335,6 +355,7 @@ def build_rows(con=None):
         D = render.compute(con)
         steps = _daily_steps(con)
         workouts = _daily_workouts(con)
+        naps = _daily_naps(D)
         spo2_f = cfg.DAILY_FIELDS["daily-oxygen-saturation"][1]
         spo2_df = mx.normalize_daily(
             ingest.load("daily-oxygen-saturation", con),
@@ -436,6 +457,7 @@ def build_rows(con=None):
             "body_load": _clean(body_load),
             "steps": _clean(steps.get(night.date())),
             "workouts": workouts.get(night.date()) or None,
+            "naps": naps.get(night.date()) or None,
             "sleep_start": _clean(start),
             "sleep_end": _clean(end),
             "total_sleep_min": _clean(r.get("asleep")),
