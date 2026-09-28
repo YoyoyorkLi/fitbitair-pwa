@@ -42,6 +42,9 @@ a{color:var(--accent)}
    come from the hidden header's own margin, which was an accident and read as the
    pages starting lower than Day's header. */
 #workouts,#drinks,#trends{padding-top:var(--top-gap)}
+/* Trends opens on a chart card, not a calendar or a button, and at the shared gap
+   it read as crowding the status bar. A little more, for that page only. */
+#trends{padding-top:calc(var(--top-gap) + 12px)}
 
 /* Night selector. Meets Apple's 44px touch-target advice now that there is no
    brand wordmark left to crowd off a 320px screen for it. Arrow keys and the

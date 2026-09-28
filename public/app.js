@@ -1214,7 +1214,7 @@ function renderDay() {
         // D.hypnos[i] is keyed by WAKE date -- this night mostly ran the
         // evening before, so its "start" clock time typically needs to read
         // as yesterday relative to this chart. See nightSpan() in charts.js.
-        sleep: showSleep && D.hypnos[i] ? { start: D.hypnos[i].start, min: D.hypnos[i].span } : null,
+        sleep: showSleep && D.hypnos[i] ? { start: D.hypnos[i].start, min: D.hypnos[i].span, asleep: t.asleep } : null,
         // The Sleep chip is "when was I asleep", so a nap is part of it.
         naps: showSleep ? (D.naps[i] || []) : [],
       }),

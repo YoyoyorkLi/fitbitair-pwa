@@ -461,6 +461,10 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null,
   // drink markers further down, so declared once rather than twice.
   const tLo = t[0], tHi = t[t.length - 1];
 
+  // Where each sleep block landed, so its length can be written on it after the
+  // curve is drawn (see "Sleep block lengths" below).
+  const blocks = [];
+
   // Sleep overlay: same idea as the workout band below, but the night is one
   // object, not a list, and uses nightSpan() rather than unroll() since a
   // late bedtime needs to land BEFORE this chart's start, not rolled forward
@@ -471,6 +475,9 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null,
       const xs = X(Math.max(s, tLo)), xe = X(Math.min(e, tHi));
       p += `<rect x="${xs.toFixed(1)}" y="${y0}" width="${Math.max(xe - xs, 1.5).toFixed(1)}" height="${y1 - y0}"
         fill="${col("rem")}" opacity=".18" data-tip="${esc(`Asleep|${clock12(s)}–${clock12(e)}`)}"/>`;
+      // `asleep`, not `min`: min is time in bed, the block's own width. The label
+      // says what the Sleep Score tile says, so the two numbers are one number.
+      if (ok(sleep.asleep)) blocks.push({ xs, xe, minutes: sleep.asleep, word: "Sleep" });
     }
   }
 
@@ -484,6 +491,7 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null,
     const xs = X(Math.max(s, tLo)), xe = X(Math.min(e, tHi));
     p += `<rect x="${xs.toFixed(1)}" y="${y0}" width="${Math.max(xe - xs, 1.5).toFixed(1)}" height="${y1 - y0}"
       fill="${col("rem")}" opacity=".18" data-tip="${esc(`Nap|${clock12(s)}–${clock12(e)}`)}"/>`;
+    if (Number(n.min) > 0) blocks.push({ xs, xe, minutes: Number(n.min), word: "Nap" });
   }
 
   // Workout overlay: a translucent full-height band over each session's own
@@ -598,6 +606,31 @@ export function hrIntraday(W, { curve, drinks = [], workouts = [], sleep = null,
       <circle cx="${x.toFixed(1)}" cy="${cy}" r="${WR}" fill="${col("workout")}" data-tip="${esc(m.tip)}"/>
       ${txt(x, cy + 3.4, m.n, { size: 9, anchor: "middle", fill: "bg", weight: 700 })}`;
   });
+
+  // Sleep block lengths: the time asleep, written across the top of each block --
+  // "Sleep 7h 12m" on the night, "Nap 1h 31m" on a nap. The bands say WHEN and
+  // nothing says HOW LONG, and a tooltip is no answer on a phone (marks inside a
+  // scrubbable chart are excluded from it). Drawn after the curve so the line
+  // never runs through the text.
+  //
+  // Fit is estimated, not measured -- there is no DOM here to measure with: about
+  // 5.2px a character at 9px. The word goes first and is the first thing dropped
+  // when a block is too narrow; a nap only ~40px wide keeps just its duration. A
+  // duration wider than its block is still written, centred on it and clamped
+  // inside the plot, since a label a few pixels wider than a short block reads
+  // fine and no label at all reads as a block with no length. A label that would
+  // land on the previous one is skipped instead of smeared over it.
+  const LBL = 9, CW = 5.2;
+  let lblRight = -1e9;
+  for (const blk of blocks.sort((u, v) => u.xs - v.xs)) {
+    const len = dur(blk.minutes), room = blk.xe - blk.xs - 6;
+    const text = (blk.word.length + 1 + len.length) * CW <= room ? `${blk.word} ${len}` : len;
+    const half = (text.length * CW) / 2;
+    const cx = Math.min(Math.max((blk.xs + blk.xe) / 2, x0 + half), x1 - half);
+    if (cx - half < lblRight + 4) continue;
+    lblRight = cx + half;
+    p += txt(cx, y0 + 14, text, { size: LBL, anchor: "middle", fill: "text", weight: 600 });
+  }
 
   // Hit bands are on the same time scale as everything else, so they stay
   // aligned across a gap; `data-x` hands the scrubber the centre directly.
