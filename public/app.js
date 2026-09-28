@@ -2030,6 +2030,25 @@ function renderTrendCharts(D, days) {
 }
 
 // --------------------------------------------------------------------- tabs
+// Under ?debug: where did the bottom tab bar actually land? On a phone in
+// standalone mode it has been seen ~47px (the top safe-area inset) above the
+// screen's bottom on pages shorter than the screen and flush on tall ones, and
+// nothing a desktop browser does reproduces that. So print the numbers instead
+// of guessing at them -- viewport, visual viewport, document height, and the
+// gap between the bar's bottom and the screen's. Twice: at once, and after the
+// page has had time to settle, since the shift may only appear after layout.
+function barDbg(tab) {
+  if (!DBG) return;
+  const say = (when) => {
+    const r = document.querySelector(".tabs").getBoundingClientRect(), vv = window.visualViewport;
+    dbg(`bar ${tab}/${when}: gap=${Math.round(screen.height - r.bottom)} inner=${innerHeight} ` +
+        `vv=${vv ? `${Math.round(vv.height)}@${Math.round(vv.offsetTop)}` : "-"} screen=${screen.height} ` +
+        `doc=${document.documentElement.scrollHeight} scrollY=${Math.round(scrollY)} ${CTX}`);
+  };
+  say("now");
+  setTimeout(() => say("+400ms"), 400);
+}
+
 for (const btn of document.querySelectorAll(".tab")) {
   btn.addEventListener("click", () => {
     for (const b of document.querySelectorAll(".tab")) b.setAttribute("aria-selected", String(b === btn));
@@ -2038,12 +2057,16 @@ for (const btn of document.querySelectorAll(".tab")) {
     // month navigation -- a night selector on top of either would be a
     // control that changes nothing on Trends, and a second, conflicting
     // "which date" control on Workouts.
-    $("daynav").hidden = btn.dataset.tab !== "today";
+    // The wrapper, not just the selector inside it: .top keeps its bottom margin
+    // when empty, and that was 18px of dead space above the calendar -- the
+    // Workouts and Drinks pages started lower than the Day page's header.
+    $("dash-top").hidden = btn.dataset.tab !== "today";
     tip.hidden = true;
     // The tabs used to sit at the top of the page, so reaching them meant the
     // page was already at scroll 0. At the bottom they can be tapped from deep
     // in a long tab, and the new one would open scrolled to wherever that was.
     scrollTo(0, 0);
+    barDbg(btn.dataset.tab);
     if (btn.dataset.tab === "drinks") refreshTonight();
   });
 }

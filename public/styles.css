@@ -17,6 +17,17 @@ body{
   padding:max(22px,env(safe-area-inset-top)) 16px max(40px,env(safe-area-inset-bottom));
 }
 .screen{max-width:760px;margin:0 auto}
+/* On a phone in standalone mode the fixed tab bar was seen ~47px (the top
+   safe-area inset) above the bottom of the screen, but ONLY on pages shorter
+   than the screen -- Workouts and Drinks -- and flush on the tall ones (Day,
+   Trends). A document that cannot scroll appears to get a different layout
+   viewport there. One pixel of overflow makes every page a scrollable one, which
+   is the state the tall pages are in, and costs nothing anyone can see.
+   Touch only: on a desktop it would put a scrollbar on every short page.
+   This is a fix to a symptom, reasoned from screenshots, on a platform the
+   dev browser is not -- if the bar still floats, ?debug now prints its position
+   on every tab switch (barDbg in app.js), which is what to read next. */
+@media (pointer:coarse){body{min-height:calc(100vh + 1px)}}
 /* The fixed tab bar sits over the bottom of the page; leave room for it, plus
    the home-indicator inset it grows by, so the last card is never under it. */
 #dash{padding-bottom:calc(var(--tabbar-h) + env(safe-area-inset-bottom))}
