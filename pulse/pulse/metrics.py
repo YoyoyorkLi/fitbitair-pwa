@@ -106,7 +106,10 @@ def to_local(x):
     """UTC (tz-aware or Z-suffixed) -> naive local wall-clock."""
     tz = _tz()
     if isinstance(x, pd.Series):
-        s = pd.to_datetime(x, utc=True, errors="coerce")
+        # ISO8601, not the inferred format: pandas 2 infers one format from the
+        # first value and turns every differently-shaped stamp (no fractional
+        # seconds, another digit count) into NaT, which normalize_hr then drops.
+        s = pd.to_datetime(x, utc=True, errors="coerce", format="ISO8601")
         return s.dt.tz_convert(tz).dt.tz_localize(None) if tz else s.dt.tz_localize(None)
     t = pd.Timestamp(x)
     t = t.tz_localize("UTC") if t.tzinfo is None else t.tz_convert("UTC")
