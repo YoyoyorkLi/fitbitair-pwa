@@ -912,8 +912,8 @@ export function doseResponse(W, D) {
 }
 
 /**
- * One dot per drinking night: how much alcohol was still in your system when you fell
- * asleep (x, in standard drinks) against how far that night's score landed from
+ * One dot per drinking night: the hours between your last drink and falling
+ * asleep (x) against how far that night's score landed from
  * your sober-night average (y). `pts` come from alcoholTimingPoints() in app.js,
  * already paired by timestamp, so this only draws.
  *
@@ -925,25 +925,20 @@ export function alcoholTiming(W, { pts, sd, unit }) {
   if (pts.length < 2) {
     return svg(W, 92, txt(W / 2, 50, "needs a few drinking nights with sleep recorded", { anchor: "middle" }), "no data");
   }
-  const maxX = Math.max(3, Math.ceil(Math.max(...pts.map((p) => p.onBoard))));
+  const maxX = Math.max(4, Math.ceil(Math.max(...pts.map((p) => p.gapH))));
   const ys = pts.map((p) => p.dy);
   const lo = Math.floor((Math.min(-15, ...ys, -sd) - 4) / 5) * 5, hi = Math.ceil((Math.max(10, ...ys, sd) + 4) / 5) * 5;
   const X = (v) => x0 + (v / maxX) * (x1 - x0), Y = (v) => y1 - ((v - lo) / (hi - lo)) * (y1 - y0);
 
-  // Nights that cleared before bed all sit at x=0; spread them a little so
-  // they don't stack into one opaque dot. Seeded, so the layout is stable.
-  let seed = 5;
-  const jit = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return (seed / 0x7fffffff - 0.5) * 0.16; };
-
   const N = pts.length;
-  const sx = pts.reduce((a, p) => a + p.onBoard, 0), sy = ys.reduce((a, v) => a + v, 0);
-  const sxy = pts.reduce((a, p) => a + p.onBoard * p.dy, 0), sxx = pts.reduce((a, p) => a + p.onBoard * p.onBoard, 0);
+  const sx = pts.reduce((a, p) => a + p.gapH, 0), sy = ys.reduce((a, v) => a + v, 0);
+  const sxy = pts.reduce((a, p) => a + p.gapH * p.dy, 0), sxx = pts.reduce((a, p) => a + p.gapH * p.gapH, 0);
   const den = N * sxx - sx * sx;
   const m = den > 1e-9 ? (N * sxy - sx * sy) / den : 0, b = (sy - m * sx) / N;
 
   let dots = "";
   for (const p of pts) {
-    const x = X(Math.max(0, p.onBoard + (p.onBoard < 0.05 ? Math.abs(jit()) : 0)));
+    const x = X(p.gapH);
     dots += `<circle cx="${x.toFixed(1)}" cy="${Y(p.dy).toFixed(1)}" r="${(3.5 + Math.min(p.drinks, 8) * 0.9).toFixed(1)}"
       fill="${col("drink")}" opacity=".72" stroke="${col("panel")}" stroke-width="1.5" data-tip="${esc(p.tip)}"/>`;
   }
@@ -953,18 +948,18 @@ export function alcoholTiming(W, { pts, sd, unit }) {
      <line x1="${x0}" y1="${Y(0).toFixed(1)}" x2="${x1}" y2="${Y(0).toFixed(1)}" stroke="${col("muted")}" stroke-width="1.25" stroke-dasharray="5 4" opacity=".8"/>
      ${txt(x1, Y(sd) - 5, "typical sober night", { size: fs })}` +
     (N >= 5 ? `<line x1="${X(0)}" y1="${Y(b).toFixed(1)}" x2="${X(maxX)}" y2="${Y(m * maxX + b).toFixed(1)}" stroke="${col("drink")}" stroke-width="2" opacity=".75"
-       data-tip="${esc(`fit|${m.toFixed(1)}${unit} per drink still in system`)}"/>` : "") +
+       data-tip="${esc(`fit|${m.toFixed(1)}${unit} per extra hour`)}"/>` : "") +
     dots + axis(x0, x1, y1) +
     Array.from({ length: maxX + 1 }, (_, d) => txt(X(d), y1 + 18, d, { anchor: "middle" })).join("") +
     [lo, 0, hi].map((v) => txt(x0 - 9, Y(v) + 4, (v > 0 ? "+" : "") + v)).join("") +
-    txt((x0 + x1) / 2, h - 8, "standard drinks still in system at bedtime", { size: 11, anchor: "middle" });
-  return svg(W, h, body, "Alcohol still in system at bedtime against the next score's change from your sober average");
+    txt((x0 + x1) / 2, h - 8, "hours from last drink to bedtime", { size: 11, anchor: "middle" });
+  return svg(W, h, body, "Hours from last drink to bedtime against the next score's change from your sober average");
 }
 
-/** Least-squares slope of dy on onBoard, or NaN when the fit is meaningless. */
+/** Least-squares slope of dy on gapH, or NaN when the fit is meaningless. */
 export const timingSlope = (pts) => {
-  const N = pts.length, sx = pts.reduce((a, p) => a + p.onBoard, 0), sy = pts.reduce((a, p) => a + p.dy, 0);
-  const sxy = pts.reduce((a, p) => a + p.onBoard * p.dy, 0), sxx = pts.reduce((a, p) => a + p.onBoard * p.onBoard, 0);
+  const N = pts.length, sx = pts.reduce((a, p) => a + p.gapH, 0), sy = pts.reduce((a, p) => a + p.dy, 0);
+  const sxy = pts.reduce((a, p) => a + p.gapH * p.dy, 0), sxx = pts.reduce((a, p) => a + p.gapH * p.gapH, 0);
   const den = N * sxx - sx * sx;
   return N >= 5 && den > 1e-9 ? (N * sxy - sx * sy) / den : NaN;
 };

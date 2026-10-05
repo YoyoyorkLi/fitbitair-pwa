@@ -1968,12 +1968,10 @@ function renderTrends(D) {
   renderTrendCharts(D, pickDefaultRange(D));
 }
 
-// ------------------------------------------------- alcohol in system at bedtime
-// Standard drinks the body clears per hour. A rule of thumb (~one drink an
-// hour), not a measurement -- it only has to rank nights, so one constant.
-const CLEAR_PER_HOUR = 1;
-// A drink further back than this is gone whatever the rate says; also bounds
-// the lookup so a stray row from last week can't pair with tonight's sleep.
+// ------------------------------------------------- last drink -> bedtime gap
+// Deliberately just the clock gap, with no clearance model: how fast a body
+// clears alcohol varies by person and nobody has measured it here.
+// Bounds the lookup so a stray row from last week can't pair with tonight's sleep.
 const TIMING_LOOKBACK_MIN = 12 * 60;
 
 const dayNum = (iso) => { const [y, m, d] = iso.split("-").map(Number); return Date.UTC(y, m - 1, d) / 86400000; };
@@ -2006,13 +2004,7 @@ function alcoholTimingPoints(D, metric) {
     }
     const startMin = ((bed % 1440) + 1440) % 1440;
     const mine = all.filter((d) => d.at <= bed && d.at >= bed - TIMING_LOOKBACK_MIN);
-    let level = 0, t = null;
-    for (const d of mine) {
-      if (t != null) level = Math.max(0, level - ((d.at - t) / 60) * CLEAR_PER_HOUR);
-      level += d.std; t = d.at;
-    }
-    if (t != null) level = Math.max(0, level - ((bed - t) / 60) * CLEAR_PER_HOUR);
-    nights.push({ j, v: vals[j], mine, bed, startMin, onBoard: level });
+    nights.push({ j, v: vals[j], mine, bed, startMin });
   }
   const sober = nights.filter((n) => !n.mine.length).map((n) => n.v);
   const pool = sober.length >= 3 ? sober : nights.map((n) => n.v);
@@ -2024,8 +2016,8 @@ function alcoholTimingPoints(D, metric) {
     const gapH = (n.bed - last.at) / 60;
     const lastClock = ch.clock12(((last.at % 1440) + 1440) % 1440);
     return {
-      onBoard: n.onBoard, drinks, dy: n.v - mean,
-      tip: `${D.dates[n.j]}|${+drinks.toFixed(1)} drinks, last ${lastClock}, bed ${ch.clock12(n.startMin)} (${gapH.toFixed(1)}h later) → ${+n.onBoard.toFixed(1)} in system, ${Math.round(n.v)} (${n.v - mean >= 0 ? "+" : ""}${Math.round(n.v - mean)} vs sober ${Math.round(mean)})`,
+      gapH, drinks, dy: n.v - mean,
+      tip: `${D.dates[n.j]}|${+drinks.toFixed(1)} drinks, last ${lastClock}, bed ${ch.clock12(n.startMin)} (${gapH.toFixed(1)}h later) → ${Math.round(n.v)} (${n.v - mean >= 0 ? "+" : ""}${Math.round(n.v - mean)} vs sober ${Math.round(mean)})`,
     };
   });
   return { pts, sd: sd || 5 };
@@ -2039,7 +2031,7 @@ function renderTimingCard(D) {
   $("timing-card").innerHTML = `
     <div class="card"><h2>Drink timing vs next-morning score</h2>
       <p class="readout live">${ok(m)
-        ? `<b>${m.toFixed(1)} ${label} points per drink still in system at bedtime</b><span> · ${pts.length} drinking nights</span>`
+        ? `<b>${m.toFixed(1)} ${label} points per extra hour between last drink and bed</b><span> · ${pts.length} drinking nights</span>`
         : `<b>Not enough drinking nights for a trend yet</b><span> · ${pts.length} so far</span>`}</p>
       <div class="range" role="tablist" aria-label="Score">
         ${[["recovery", "Recovery"], ["score", "Sleep score"]].map(([k, t]) =>
