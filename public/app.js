@@ -142,6 +142,13 @@ const card = (ttl, inner, note, scrub = true) => {
    <div class="chartbox${hasScrub ? " scrubbable" : ""}">${inner}</div>${note ? `<p class="note">${note}</p>` : ""}</div>`;
 };
 
+// Recovery and Sleep Score rings share one colour scale -- green, amber, red --
+// and one red line, so a bad night reads the same on both. Only the green
+// cutoff differs: a sleep score has to reach 80 to count as good.
+const RING_RED_BELOW = 34;
+const RING_GOOD = { recovery: 67, sleep: 80 };
+const ringCol = (v, good) => (v >= good ? col("good") : v >= RING_RED_BELOW ? col("awake") : col("warn"));
+
 let sb = null, DATA = null, isDemo = false;
 
 // Which night the Day tab is showing. -1 until data lands, then pinned to
@@ -1137,7 +1144,7 @@ function renderDay() {
   const latest = i === D.dates.length - 1;
   updateDayNav(D, i);
 
-  const recCol = t.recovery >= 67 ? col("good") : t.recovery >= 34 ? col("awake") : col("warn");
+  const recCol = ringCol(t.recovery, RING_GOOD.recovery);
   const sober = D.recovery.filter((_, k) => !D.drinks[k] && ok(D.recovery[k]));
   const recBase = sober.length ? Math.round(sober.reduce((a, b) => a + b, 0) / sober.length) : NaN;
   // Prefer the trailing-median baseline Postgres already computed for THIS
@@ -1162,7 +1169,7 @@ function renderDay() {
     <div class="kpis">
       ${kpi(ch.gauge(t.strain, 21, ok(t.target) && t.strain > t.target ? col("warn") : col("strain"), "Day Strain", `Day Strain ${t.strain} of 21|waking heart-rate load — sleep doesn't count${ok(t.target) ? `|stay under ${t.target} today${t.loadState > 0 ? " (capped — recovery load)" : ""}` : ""}`), "Day Strain", ok(t.target) ? `under ${t.target}` : "", "strain")}
       ${kpi(ch.ring(t.recovery, recCol, "Recovery", `Recovery ${t.recovery}|55% HRV · 25% resting HR · 20% sleep`), "Recovery", `${t.recovery >= 67 ? "well recovered" : t.recovery >= 34 ? "moderate" : "low"}${t.drinks ? ` · ${t.drinks} drink${t.drinks > 1 ? "s" : ""}` : ""}`, "recovery")}
-      ${kpi(ch.ring(t.score, ok(t.score) && t.score >= 80 ? col("good") : col("awake"), "Sleep Score", ok(t.score) ? `Sleep Score ${t.score}|how well + how settled, scaled to how long you slept vs what you needed — more when you're carrying sleep debt` : "No sleep recorded|this night has not been scored"), "Sleep Score", ok(t.asleep) ? hm(t.asleep) : "not yet", "sleep")}
+      ${kpi(ch.ring(t.score, ringCol(t.score, RING_GOOD.sleep), "Sleep Score", ok(t.score) ? `Sleep Score ${t.score}|how well + how settled, scaled to how long you slept vs what you needed — more when you're carrying sleep debt` : "No sleep recorded|this night has not been scored"), "Sleep Score", ok(t.asleep) ? hm(t.asleep) : "not yet", "sleep")}
     </div>
     ${loadBar(t)}
     ${napBar(D.naps[i] || [])}
@@ -1748,7 +1755,7 @@ function renderDetailBody(kind) {
   }
 
   if (kind === "recovery") {
-    const recCol = t.recovery >= 67 ? col("good") : t.recovery >= 34 ? col("awake") : col("warn");
+    const recCol = ringCol(t.recovery, RING_GOOD.recovery);
     const trendDays = win(D, 30, 14);
     const hrvBaseUsed = ok(t.hrvBaseline) ? t.hrvBaseline : ch.slope(D).base;
     const hrvPct = Math.round((t.hrv / hrvBaseUsed) * 100);
@@ -1813,7 +1820,7 @@ function renderDetailBody(kind) {
   return `
     ${slept ? "" : `<div class="banner">No sleep recorded for <b>${t.night}</b> — showing the night of
       <b>${sn.night ?? "the last full night"}</b>.</div>`}
-    <div class="detail-dial">${ch.ring(sn.score, ok(sn.score) && sn.score >= 80 ? col("good") : col("awake"), "Sleep Score", ok(sn.score) ? `Sleep Score ${sn.score}|how well + how settled, × the fraction of ${hm(ok(sn.scoreTarget) ? sn.scoreTarget : sn.need)} you slept` : "No sleep recorded|this night has not been scored")}</div>
+    <div class="detail-dial">${ch.ring(sn.score, ringCol(sn.score, RING_GOOD.sleep), "Sleep Score", ok(sn.score) ? `Sleep Score ${sn.score}|how well + how settled, × the fraction of ${hm(ok(sn.scoreTarget) ? sn.scoreTarget : sn.need)} you slept` : "No sleep recorded|this night has not been scored")}</div>
     <p class="note center">${ok(sn.asleep) ? `<b>${hm(sn.asleep)}</b> asleep of <b>${hm(sn.need)}</b> needed${ok(sn.asleep) && sn.asleep >= GOAL_MIN ? " · hit your 8h goal" : ""}` : "not yet scored"}</p>
     <div class="card"><div class="stats">
       ${stat(ok(sn.asleep) ? hm(sn.asleep) : "—", "Asleep")}${stat(ok(sn.eff) ? sn.eff + "%" : "—", "Efficiency")}
