@@ -1959,11 +1959,94 @@ function renderTrends(D) {
     <div class="card"><h2>Drinks vs next-morning HRV</h2>
       <p class="readout live"><b>${perDrink.toFixed(1)}% of baseline HRV per drink</b><span> · ${nights} drinking night${nights === 1 ? "" : "s"}</span></p>
       <div class="chartbox">${ch.doseResponse(W, D)}</div></div>
+    <div id="timing-card"></div>
     <div class="range" role="tablist" aria-label="Trend window">
       ${RANGE_PRESETS.map((n) => `<button class="rbtn" role="tab" aria-selected="false" data-days="${n}" type="button">${n}d</button>`).join("")}
     </div>
     <div id="trend-cards"></div>`;
+  renderTimingCard(D);
   renderTrendCharts(D, pickDefaultRange(D));
+}
+
+// ------------------------------------------------- alcohol on board at bedtime
+// Standard drinks the body clears per hour. A rule of thumb (~one drink an
+// hour), not a measurement -- it only has to rank nights, so one constant.
+const CLEAR_PER_HOUR = 1;
+// A drink further back than this is gone whatever the rate says; also bounds
+// the lookup so a stray row from last week can't pair with tonight's sleep.
+const TIMING_LOOKBACK_MIN = 12 * 60;
+
+const dayNum = (iso) => { const [y, m, d] = iso.split("-").map(Number); return Date.UTC(y, m - 1, d) / 86400000; };
+
+// Pairs each night's sleep with the drinks before it BY TIMESTAMP, not by index:
+// nightRows[i] is the evening that starts on dates[i] while the sleep it wrecked
+// is the row dated the next morning, and the demo fixture doesn't follow that
+// offset. Both sides are put on one wall-clock minute line (day * 1440 + clock),
+// which sidesteps timezone arithmetic -- clockOf/civilDay already speak the
+// display zone.
+function alcoholTimingPoints(D, metric) {
+  const all = D.drinkRows.flat()
+    .map((r) => ({ at: dayNum(civilDay(r.logged_at)) * 1440 + ch.mins(clockOf(r.logged_at)), std: Number(r.std_drinks) || 1 }))
+    .sort((a, b) => a.at - b.at);
+  const vals = metric === "score" ? D.score : D.recovery;
+  const nights = [];
+  for (let j = 0; j < D.dates.length; j++) {
+    if (!ok(vals[j])) continue;
+    let bed;
+    if (D.bed_nights) {
+      // demo fixture: minutes from this row's own midnight, evening-keyed
+      if (!ok(D.bed_nights[j])) continue;
+      bed = dayNum(D.dates[j]) * 1440 + D.bed_nights[j];
+    } else {
+      const hyp = D.hypnos[j];
+      if (!hyp) continue;
+      // A start after noon is the previous evening; a small hour is after midnight.
+      const sm = ch.mins(hyp.start);
+      bed = (dayNum(D.dates[j]) - (sm >= 720 ? 1 : 0)) * 1440 + sm;
+    }
+    const startMin = ((bed % 1440) + 1440) % 1440;
+    const mine = all.filter((d) => d.at <= bed && d.at >= bed - TIMING_LOOKBACK_MIN);
+    let level = 0, t = null;
+    for (const d of mine) {
+      if (t != null) level = Math.max(0, level - ((d.at - t) / 60) * CLEAR_PER_HOUR);
+      level += d.std; t = d.at;
+    }
+    if (t != null) level = Math.max(0, level - ((bed - t) / 60) * CLEAR_PER_HOUR);
+    nights.push({ j, v: vals[j], mine, bed, startMin, onBoard: level });
+  }
+  const sober = nights.filter((n) => !n.mine.length).map((n) => n.v);
+  const pool = sober.length >= 3 ? sober : nights.map((n) => n.v);
+  const mean = pool.reduce((a, v) => a + v, 0) / (pool.length || 1);
+  const sd = Math.sqrt(pool.reduce((a, v) => a + (v - mean) ** 2, 0) / (pool.length || 1));
+  const pts = nights.filter((n) => n.mine.length).map((n) => {
+    const drinks = n.mine.reduce((a, d) => a + d.std, 0);
+    const last = n.mine[n.mine.length - 1];
+    const gapH = (n.bed - last.at) / 60;
+    const lastClock = ch.clock12(((last.at % 1440) + 1440) % 1440);
+    return {
+      onBoard: n.onBoard, drinks, dy: n.v - mean,
+      tip: `${D.dates[n.j]}|${+drinks.toFixed(1)} drinks, last ${lastClock}, bed ${ch.clock12(n.startMin)} (${gapH.toFixed(1)}h later) → ${+n.onBoard.toFixed(1)} on board, ${Math.round(n.v)} (${n.v - mean >= 0 ? "+" : ""}${Math.round(n.v - mean)} vs sober ${Math.round(mean)})`,
+    };
+  });
+  return { pts, sd: sd || 5 };
+}
+
+let timingMetric = "recovery";
+function renderTimingCard(D) {
+  const { pts, sd } = alcoholTimingPoints(D, timingMetric);
+  const m = ch.timingSlope(pts);
+  const label = timingMetric === "score" ? "sleep score" : "recovery";
+  $("timing-card").innerHTML = `
+    <div class="card"><h2>Drink timing vs next-morning score</h2>
+      <p class="readout live">${ok(m)
+        ? `<b>${m.toFixed(1)} ${label} points per drink still on board at bedtime</b><span> · ${pts.length} drinking nights</span>`
+        : `<b>Not enough drinking nights for a trend yet</b><span> · ${pts.length} so far</span>`}</p>
+      <div class="range" role="tablist" aria-label="Score">
+        ${[["recovery", "Recovery"], ["score", "Sleep score"]].map(([k, t]) =>
+          `<button class="rbtn" role="tab" aria-selected="${k === timingMetric}" data-metric="${k}" type="button">${t}</button>`).join("")}
+      </div>
+      <div class="chartbox">${ch.alcoholTiming(W, { pts, sd, unit: " pts" })}</div></div>`;
+  primeReadouts($("timing-card"));
 }
 
 const RANGE_PRESETS = [7, 14, 30, 90];
@@ -1979,7 +2062,7 @@ function pickDefaultRange(D) {
 }
 
 function renderTrendCharts(D, days) {
-  $("trends").querySelectorAll(".rbtn").forEach((b) => b.setAttribute("aria-selected", String(Number(b.dataset.days) === days)));
+  $("trends").querySelectorAll(".rbtn[data-days]").forEach((b) => b.setAttribute("aria-selected", String(Number(b.dataset.days) === days)));
   $("trend-cards").innerHTML = `
     ${card(`HRV (rMSSD) — ${days} days`, ch.sparkline(W, D, D.hrv, col("accent"), days, "ms"))}
     ${card(`Resting heart rate — ${days} days`, ch.sparkline(W, D, D.rhr, col("warn"), days, "bpm"))}
@@ -2035,7 +2118,9 @@ for (const btn of document.querySelectorAll(".tab")) {
 // button would have to be reattached each time (and was).
 $("trends").addEventListener("click", (e) => {
   const b = e.target.closest(".rbtn");
-  if (b && DATA) renderTrendCharts(DATA, Number(b.dataset.days));
+  if (!b || !DATA) return;
+  if (b.dataset.metric) { timingMetric = b.dataset.metric; renderTimingCard(DATA); return; }
+  renderTrendCharts(DATA, Number(b.dataset.days));
 });
 
 // -------------------------------------------------------------- night picker

@@ -523,6 +523,9 @@ const out = {
   curve, hypno, today,
   // per-night detail so the calendars aren't a single lit cell
   drink_times_nights, drink_rows_nights, workout_nights, nap_nights,
+  // minutes from 00:00 of dates[i] to that evening's bedtime (can exceed 1440);
+  // the demo has no per-night hypnogram, and the Trends drink-timing card needs a bedtime
+  bed_nights: S.bed.map((b, i) => (i === LAST ? bedMin : b)),
   // newest-night singulars, kept for older code paths / self-documentation
   drink_times, workout_list, first_drink, last_drink, drink_rows,
   dates_labels: dates.map((d) => d.slice(5)),
