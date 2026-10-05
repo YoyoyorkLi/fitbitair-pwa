@@ -784,6 +784,12 @@ async function loadLive() {
     D.tonight = (rows || [])
       .filter((r) => drinkNightOf(new Date(r.logged_at), tz) === tn)
       .map((r) => ({ id: r.id, logged_at: new Date(r.logged_at), std_drinks: r.std_drinks }));
+
+    // The first drink ever logged, not just the first in this window: a night
+    // before it isn't sober, it's unrecorded. The drink charts' sober baseline
+    // starts here (see alcoholTimingPoints).
+    const { data: first } = await sb.from("drinks").select("logged_at").order("logged_at").limit(1);
+    D.loggingSince = first?.[0] ? new Date(first[0].logged_at) : null;
   }
 
   // The dead man's check the schema was built around and nothing ever read.
@@ -1960,11 +1966,13 @@ function renderTrends(D) {
       <p class="readout live"><b>${perDrink.toFixed(1)}% of baseline HRV per drink</b><span> · ${nights} drinking night${nights === 1 ? "" : "s"}</span></p>
       <div class="chartbox">${ch.doseResponse(W, D)}</div></div>
     <div id="timing-card"></div>
+    <div id="score-gap-card"></div>
     <div class="range" role="tablist" aria-label="Trend window">
       ${RANGE_PRESETS.map((n) => `<button class="rbtn" role="tab" aria-selected="false" data-days="${n}" type="button">${n}d</button>`).join("")}
     </div>
     <div id="trend-cards"></div>`;
   renderTimingCard(D);
+  renderScoreGapCard(D);
   renderTrendCharts(D, pickDefaultRange(D));
 }
 
@@ -1987,6 +1995,12 @@ function alcoholTimingPoints(D, metric) {
     .map((r) => ({ at: dayNum(civilDay(r.logged_at)) * 1440 + ch.mins(clockOf(r.logged_at)), std: Number(r.std_drinks) || 1 }))
     .sort((a, b) => a.at - b.at);
   const vals = metric === "score" ? D.score : D.recovery;
+  // Nights before drink logging began say nothing about drinking -- no drinks
+  // logged there means unrecorded, not sober -- so they sit out of both the
+  // sober baseline and the drinking points. The demo has no loggingSince; its
+  // first fixture drink stands in.
+  const wall = (d) => dayNum(civilDay(d)) * 1440 + ch.mins(clockOf(d));
+  const since = D.loggingSince ? wall(D.loggingSince) : all.length ? all[0].at : -Infinity;
   const nights = [];
   for (let j = 0; j < D.dates.length; j++) {
     if (!ok(vals[j])) continue;
@@ -2002,6 +2016,7 @@ function alcoholTimingPoints(D, metric) {
       const sm = ch.mins(hyp.start);
       bed = (dayNum(D.dates[j]) - (sm >= 720 ? 1 : 0)) * 1440 + sm;
     }
+    if (bed < since) continue;
     const startMin = ((bed % 1440) + 1440) % 1440;
     const mine = all.filter((d) => d.at <= bed && d.at >= bed - TIMING_LOOKBACK_MIN);
     nights.push({ j, v: vals[j], mine, bed, startMin });
@@ -2016,7 +2031,7 @@ function alcoholTimingPoints(D, metric) {
     const gapH = (n.bed - last.at) / 60;
     const lastClock = ch.clock12(((last.at % 1440) + 1440) % 1440);
     return {
-      gapH, drinks, dy: n.v - mean,
+      gapH, drinks, v: n.v, dy: n.v - mean,
       tip: `${D.dates[n.j]}|${+drinks.toFixed(1)} drinks, last ${lastClock}, bed ${ch.clock12(n.startMin)} (${gapH.toFixed(1)}h later) → ${Math.round(n.v)} (${n.v - mean >= 0 ? "+" : ""}${Math.round(n.v - mean)} vs sober ${Math.round(mean)})`,
     };
   });
@@ -2055,6 +2070,24 @@ function renderTimingCard(D) {
         rows: DRINK_BUCKETS.map((b) => b[2]), cols: GAP_BUCKETS.map((b) => b[2]), cells, sd, metric: label })}</div></div>`;
 }
 
+// Sleep score against the last-drink-to-bed gap, dot size = drinks. The
+// headline only states a slope once its 95% interval clears zero; until then
+// it says so, because a line through a few nights is mostly the heaviest one.
+function renderScoreGapCard(D) {
+  const { pts, sd, mean } = alcoholTimingPoints(D, "score");
+  const fit = pts.length >= 3 ? ch.ols(pts.map((p) => [1, p.gapH]), pts.map((p) => p.v)) : null;
+  const avg = pts.length ? Math.round(pts.reduce((a, p) => a + p.v, 0) / pts.length) : NaN;
+  const head = !pts.length ? "No drinking nights yet"
+    : !fit ? "Not enough nights yet"
+    : ch.isClear(fit, 1) ? `${fit.b[1] >= 0 ? "+" : "−"}${Math.abs(fit.b[1]).toFixed(1)} per hour later to bed`
+    : "No clear trend yet";
+  $("score-gap-card").innerHTML = `
+    <div class="card"><h2>Sleep score vs drink timing</h2>
+      <p class="readout live tight"><b>${head}</b></p>
+      ${pts.length ? `<p class="subline">${pts.length} drinking night${pts.length === 1 ? "" : "s"} · avg ${avg} vs ${Math.round(mean)} sober · bigger dot = more drinks</p>` : ""}
+      <div class="chartbox">${ch.scoreGapScatter(W, { pts, mean, sd, metric: "sleep score" })}</div></div>`;
+}
+
 // ---------------------------------------------------------- bedtime planner
 // One least-squares fit over every paired drinking night:
 //   recovery lost vs sober = a + b * drinks + c * hours from last drink to bed
@@ -2066,27 +2099,16 @@ const PLAN_ROUGH_NIGHTS = 15;
 
 function fitDrinkGap(pts) {
   if (pts.length < PLAN_MIN_NIGHTS) return null;
-  const A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], y = [0, 0, 0];
-  for (const p of pts) {
-    const v = [1, p.drinks, p.gapH], loss = -p.dy;
-    for (let i = 0; i < 3; i++) { y[i] += v[i] * loss; for (let j = 0; j < 3; j++) A[i][j] += v[i] * v[j]; }
-  }
-  // Gaussian elimination with partial pivoting; a 3x3 needs nothing fancier.
-  for (let i = 0; i < 3; i++) {
-    let piv = i;
-    for (let k = i + 1; k < 3; k++) if (Math.abs(A[k][i]) > Math.abs(A[piv][i])) piv = k;
-    [A[i], A[piv]] = [A[piv], A[i]]; [y[i], y[piv]] = [y[piv], y[i]];
-    if (Math.abs(A[i][i]) < 1e-9) return null;      // every night the same drinks or gap
-    for (let k = i + 1; k < 3; k++) {
-      const f = A[k][i] / A[i][i];
-      for (let j = i; j < 3; j++) A[k][j] -= f * A[i][j];
-      y[k] -= f * y[i];
-    }
-  }
-  const c = [0, 0, 0];
-  for (let i = 2; i >= 0; i--) { let t = y[i]; for (let j = i + 1; j < 3; j++) t -= A[i][j] * c[j]; c[i] = t / A[i][i]; }
+  const y = pts.map((p) => -p.dy);
+  const full = ch.ols(pts.map((p) => [1, p.drinks, p.gapH]), y);
+  // Waiting only counts once it is distinguishable from zero. Until then the
+  // gap is dropped and the fit is drinks alone, so bedtime changes nothing --
+  // which is what the data says, rather than a slope made of one odd night.
+  const gapClear = ch.isClear(full, 2) && full.b[2] < 0;
+  const fit = gapClear ? full : ch.ols(pts.map((p) => [1, p.drinks]), y);
+  if (!fit) return null;
   return {
-    a: c[0], b: c[1], c: c[2], n: pts.length,
+    a: fit.b[0], b: fit.b[1], c: gapClear ? fit.b[2] : 0, gapClear, n: pts.length,
     maxGap: Math.max(...pts.map((p) => p.gapH)), maxDrinks: Math.max(...pts.map((p) => p.drinks)),
   };
 }
@@ -2109,12 +2131,28 @@ function bedPlanner(D, tn) {
   const hrs = (h) => { const m = Math.round(h * 60); return m % 60 ? shortDur(m) : `${m / 60}h`; };
   const elapsed = Math.max(0, (Date.now() - last.getTime()) / 3600e3);
   const bedAt = (g) => new Date(last.getTime() + g * 3600e3);
+  const per = (v) => Math.max(0, Math.round(Math.abs(v)));
+  const caveat = [fit.n < PLAN_ROUGH_NIGHTS && "still rough",
+                  drinks > fit.maxDrinks && "more drinks than you've had before"].filter(Boolean);
+  const basis = `Based on ${fit.n} nights${caveat.length ? ` — ${caveat.join(", ")}` : ""}.`;
+  const drinkLine = fit.b > 0 ? ` Each drink costs ~${per(fit.b)}.` : "";
+  const recOf = (loss) => Math.round(Math.min(100, Math.max(0, mean - loss)));
+
+  // No clear waiting effect yet: one number for tonight, no bedtime rows --
+  // every row would say the same thing.
+  if (!fit.gapClear) {
+    const loss = lossAt(0);
+    return `<div class="card planner"><h2>Bedtime planner</h2>
+      <p class="readout live tight"><b>${loss <= sd ? "Should be a normal night" : `Expect recovery ~${recOf(loss)}`}</b></p>
+      <p class="subline">${sub}</p>
+      <p class="note">A normal night for you is about ${Math.round(mean)}.${drinkLine}
+        Waiting longer before bed hasn't made a clear difference yet. ${basis}</p></div>`;
+  }
+
   // One line of big type; the rows and the footnote carry the rest.
   let head, tail = "";
   if (lossAt(elapsed) <= sd) {
     head = "Bed any time";
-  } else if (fit.c >= 0) {
-    head = "Waiting won't help tonight";
   } else {
     const g = Math.ceil(((sd - fit.a - fit.b * drinks) / fit.c) * 4) / 4;   // to the quarter hour
     if (g > fit.maxGap + 0.25) head = "Not back to normal tonight";
@@ -2125,7 +2163,7 @@ function bedPlanner(D, tn) {
   const opts = [elapsed];
   for (let h = Math.floor(elapsed) + 1; h <= Math.min(fit.maxGap, elapsed + 3.5) && opts.length < 4; h++) opts.push(h);
   const rows = opts.map((g, k) => {
-    const loss = lossAt(g), rec = Math.round(Math.min(100, Math.max(0, mean - loss)));
+    const loss = lossAt(g), rec = recOf(loss);
     const good = loss <= sd;
     // A clock time even for the first row: "Now" read as the last drink's time,
     // and stayed "Now" on a screen left open for an hour.
@@ -2133,18 +2171,13 @@ function bedPlanner(D, tn) {
       <span class="pg">${g >= 5 / 60 ? `+${hrs(g)}` : ""}</span>
       <span class="pv">${rec}</span></div>`;
   }).join("");
-  const per = (v) => Math.max(0, Math.round(Math.abs(v)));
-  const caveat = [fit.n < PLAN_ROUGH_NIGHTS && "still rough",
-                  drinks > fit.maxDrinks && "more drinks than you've had before"].filter(Boolean);
   return `<div class="card planner"><h2>Bedtime planner</h2>
     <p class="readout live tight"><b>${head}</b>${tail ? `<span> · ${tail}</span>` : ""}</p>
     <p class="subline">${sub}</p>
     <div class="planhd"><span>Bed at</span><span>Recovery</span></div>
     ${rows}
-    <p class="note">A normal night for you is about ${Math.round(mean)}.
-      ${[fit.b > 0 && `Each drink costs ~${per(fit.b)}`, fit.c < 0 && `each hour you wait gets ~${per(fit.c)} back`]
-        .filter(Boolean).join(", ").replace(/^e/, "E")}${fit.b > 0 || fit.c < 0 ? "." : ""}
-      Based on ${fit.n} nights${caveat.length ? ` — ${caveat.join(", ")}` : ""}.</p></div>`;
+    <p class="note">A normal night for you is about ${Math.round(mean)}.${drinkLine}
+      Each hour you wait gets ~${per(fit.c)} back. ${basis}</p></div>`;
 }
 
 const RANGE_PRESETS = [7, 14, 30, 90];

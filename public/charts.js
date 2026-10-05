@@ -911,6 +911,100 @@ export function doseResponse(W, D) {
   return svg(W, h, p, "Drinks against next-morning HRV as a percentage of baseline");
 }
 
+// ------------------------------------------------------------ small stats
+// Least squares with standard errors, for the handful-of-nights fits the drink
+// charts and the bedtime planner run. X is rows of predictors (include a 1 for
+// the intercept). Returns null when there are no spare degrees of freedom or
+// the predictors are collinear -- callers treat that as "no fit yet".
+export function ols(X, y) {
+  const n = X.length, k = X[0]?.length || 0;
+  if (n <= k) return null;
+  const XtX = Array.from({ length: k }, (_, i) => Array.from({ length: k }, (_, j) => X.reduce((a, r) => a + r[i] * r[j], 0)));
+  const Xty = Array.from({ length: k }, (_, i) => X.reduce((a, r, m) => a + r[i] * y[m], 0));
+  // Gauss-Jordan inverse with partial pivoting; k is 2 or 3 here.
+  const M = XtX.map((r, i) => [...r, ...Array.from({ length: k }, (_, j) => (i === j ? 1 : 0))]);
+  for (let c = 0; c < k; c++) {
+    let piv = c;
+    for (let r = c + 1; r < k; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+    if (Math.abs(M[piv][c]) < 1e-9) return null;
+    [M[c], M[piv]] = [M[piv], M[c]];
+    const d = M[c][c];
+    for (let j = 0; j < 2 * k; j++) M[c][j] /= d;
+    for (let r = 0; r < k; r++) {
+      if (r === c) continue;
+      const f = M[r][c];
+      for (let j = 0; j < 2 * k; j++) M[r][j] -= f * M[c][j];
+    }
+  }
+  const inv = M.map((r) => r.slice(k));
+  const b = inv.map((r) => r.reduce((a, v, j) => a + v * Xty[j], 0));
+  const dof = n - k;
+  const s2 = y.reduce((a, v, m) => a + (v - X[m].reduce((t, x, j) => t + x * b[j], 0)) ** 2, 0) / dof;
+  return { b, se: inv.map((r, i) => Math.sqrt(Math.max(0, s2 * r[i]))), dof, s2, inv };
+}
+
+// Two-sided 95% Student-t critical value. Exact through 20 degrees of freedom,
+// which is where every fit in this app lives for months.
+const T95 = [12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228,
+             2.201, 2.179, 2.160, 2.145, 2.131, 2.120, 2.110, 2.101, 2.093, 2.086];
+export const tCrit = (dof) => (dof < 1 ? Infinity : dof <= 20 ? T95[dof - 1] : dof <= 30 ? 2.05 : dof <= 60 ? 2.01 : 1.98);
+
+/** Is coefficient i of a fit distinguishable from zero at 95%? */
+export const isClear = (fit, i) => !!fit && fit.se[i] > 0 && Math.abs(fit.b[i]) / fit.se[i] > tCrit(fit.dof);
+
+/**
+ * Sleep score (y) against hours from last drink to falling asleep (x), one dot
+ * per drinking night sized by how much was drunk. A least-squares line with its
+ * 95% confidence band, drawn only across the gaps you actually have -- and
+ * dashed while the band still fits a flat line, because then the slope is
+ * noise. The green band is the sober nights' average +- one SD.
+ */
+export function scoreGapScatter(W, { pts, mean, sd, metric }) {
+  if (!pts.length) return svg(W, 92, txt(W / 2, 50, "no drinking nights with sleep recorded yet", { anchor: "middle" }), "no data");
+  const h = 268, x0 = padL(W) + 6, x1 = W - padR(W) - (narrow(W) ? 4 : 16), y0 = 14, y1 = 216;
+  const vs = pts.map((p) => p.v);
+  const maxX = Math.max(4, Math.ceil(Math.max(...pts.map((p) => p.gapH))));
+  const lo = Math.max(0, Math.floor((Math.min(...vs, mean - sd) - 5) / 10) * 10);
+  const hi = Math.min(100, Math.ceil((Math.max(...vs, mean + sd) + 5) / 10) * 10);
+  const X = (v) => x0 + (v / maxX) * (x1 - x0), Y = (v) => y1 - ((Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo)) * (y1 - y0);
+  const fs = narrow(W) ? 9.5 : 10.5;
+
+  let p = grid(x0, x1, [y0, y1]) +
+    [lo, Math.round((lo + hi) / 2), hi].map((v) => txt(x0 - 9, Y(v) + 4, v)).join("");
+  if (ok(mean)) {
+    p += `<rect x="${x0}" y="${Y(mean + sd).toFixed(1)}" width="${x1 - x0}" height="${(Y(mean - sd) - Y(mean + sd)).toFixed(1)}" fill="${col("good")}" opacity=".13"/>
+      <line x1="${x0}" y1="${Y(mean).toFixed(1)}" x2="${x1}" y2="${Y(mean).toFixed(1)}" stroke="${col("good")}" stroke-width="1.25" stroke-dasharray="5 4" opacity=".7"/>` +
+      txt(x1, Y(mean + sd) - 5, `sober avg ${Math.round(mean)}`, { size: fs });
+  }
+
+  const fit = pts.length >= 3 ? ols(pts.map((q) => [1, q.gapH]), vs) : null;
+  if (fit) {
+    const xs = pts.map((q) => q.gapH), xm = xs.reduce((a, v) => a + v, 0) / xs.length;
+    const sxx = xs.reduce((a, v) => a + (v - xm) ** 2, 0);
+    const xa = Math.min(...xs), xb = Math.max(...xs), t = tCrit(fit.dof);
+    const yhat = (x) => fit.b[0] + fit.b[1] * x;
+    const half = (x) => t * Math.sqrt(fit.s2 * (1 / xs.length + (x - xm) ** 2 / sxx));
+    const steps = Array.from({ length: 25 }, (_, i) => xa + ((xb - xa) * i) / 24);
+    const upper = steps.map((x) => `${X(x).toFixed(1)},${Y(yhat(x) + half(x)).toFixed(1)}`);
+    const lower = steps.slice().reverse().map((x) => `${X(x).toFixed(1)},${Y(yhat(x) - half(x)).toFixed(1)}`);
+    const clear = isClear(fit, 1);
+    p += `<polygon points="${[...upper, ...lower].join(" ")}" fill="${col("drink")}" opacity=".14"/>
+      <line x1="${X(xa).toFixed(1)}" y1="${Y(yhat(xa)).toFixed(1)}" x2="${X(xb).toFixed(1)}" y2="${Y(yhat(xb)).toFixed(1)}"
+        stroke="${col("drink")}" stroke-width="2" opacity=".85"${clear ? "" : ` stroke-dasharray="6 5"`}
+        data-tip="${esc(`fit|${fit.b[1] >= 0 ? "+" : "−"}${Math.abs(fit.b[1]).toFixed(1)} ${metric} per hour${clear ? "" : " — not clear yet"}`)}"/>`;
+  }
+
+  // Biggest first so a small night is never hidden under a heavy one.
+  for (const q of [...pts].sort((a, b) => b.drinks - a.drinks)) {
+    p += `<circle cx="${X(q.gapH).toFixed(1)}" cy="${Y(q.v).toFixed(1)}" r="${(3.5 + Math.min(q.drinks, 14) * 1.1).toFixed(1)}"
+      fill="${col("drink")}" fill-opacity=".5" stroke="${col("drink")}" stroke-width="1.2" data-tip="${esc(q.tip)}"/>`;
+  }
+  p += axis(x0, x1, y1) +
+    Array.from({ length: maxX + 1 }, (_, d) => txt(X(d), y1 + 18, `${d}h`, { anchor: "middle" })).join("") +
+    txt((x0 + x1) / 2, h - 8, "hours from last drink to bed", { size: 11, anchor: "middle" });
+  return svg(W, h, p, `${metric} against hours from last drink to bed, dot size is drinks`);
+}
+
 // "#C4862E" + "#F2545B" at t -> "#xxxxxx". Only the drink-grid needs a blend.
 const mixHex = (a, b, t) => "#" + [1, 3, 5].map((i) => {
   const x = parseInt(a.slice(i, i + 2), 16), y = parseInt(b.slice(i, i + 2), 16);
