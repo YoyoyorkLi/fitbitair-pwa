@@ -2102,32 +2102,25 @@ function bedPlanner(D, tn) {
   const drinks = tn.reduce((a, r) => a + (Number(r.std_drinks) || 1), 0);
   const last = tn[tn.length - 1].logged_at;
   const time12 = (d) => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  const sub = `${+drinks.toFixed(1)} drink${drinks === 1 ? "" : "s"}, last at ${time12(last)}`;
+  const sub = `${+drinks.toFixed(1)} drink${drinks === 1 ? "" : "s"} · last ${time12(last)}`;
   if (!fit) {
     return `<div class="card planner"><h2>Bedtime planner</h2>
-      <p class="readout live"><b>Not enough nights yet</b><span> · ${sub}</span></p>
-      <p class="note">Needs ${PLAN_MIN_NIGHTS} drinking nights with sleep recorded to estimate — ${pts.length} so far.</p></div>`;
+      <p class="readout live"><b>Not enough nights yet</b><span> · ${pts.length} of ${PLAN_MIN_NIGHTS}</span></p></div>`;
   }
   const lossAt = (g) => fit.a + fit.b * drinks + fit.c * g;
   const hrs = (h) => { const m = Math.round(h * 60); return m % 60 ? shortDur(m) : `${m / 60}h`; };
   const elapsed = Math.max(0, (Date.now() - last.getTime()) / 3600e3);
   const bedAt = (g) => new Date(last.getTime() + g * 3600e3);
-  // head/tail share the one-line readout, so tail stays short; anything longer
-  // goes in `why` under it.
-  let head, tail, why = "";
+  // One line of big type; the rows and the footnote carry the rest.
+  let head, tail = "";
   if (lossAt(elapsed) <= sd) {
-    head = "Bed any time"; tail = "within a normal night";
+    head = "Bed any time";
   } else if (fit.c >= 0) {
-    head = "Waiting won't help much"; tail = `expect ${signedPts(lossAt(elapsed))}`;
-    why = "In your nights so far, drink count is what moved recovery, not the gap. ";
+    head = "Waiting won't help tonight";
   } else {
     const g = Math.ceil(((sd - fit.a - fit.b * drinks) / fit.c) * 4) / 4;   // to the quarter hour
-    if (g > fit.maxGap + 0.25) {
-      head = "Not back to normal tonight"; tail = `best ${signedPts(lossAt(fit.maxGap))}`;
-      why = `Even ${hrs(fit.maxGap)} after the last drink — the longest gap you have on record. `;
-    } else {
-      head = `Bed after ${time12(bedAt(g))}`; tail = `wait ${hrs(g)}`;
-    }
+    if (g > fit.maxGap + 0.25) head = "Not back to normal tonight";
+    else { head = `Bed after ${time12(bedAt(g))}`; tail = `wait ${hrs(g)}`; }
   }
   // A few concrete options: now, then each whole hour after the last drink,
   // up to the longest gap the history covers.
@@ -2137,16 +2130,21 @@ function bedPlanner(D, tn) {
     const loss = lossAt(g), rec = Math.round(Math.min(100, Math.max(0, mean - loss)));
     const good = loss <= sd;
     return `<div class="planrow${good ? " ok" : ""}"><span class="pl">${k ? `${time12(bedAt(g))}` : "Now"}</span>
-      <span class="pg">${k ? `${hrs(g)} after last` : g < 5 / 60 ? "just had one" : `${hrs(g)} since last`}</span>
-      <span class="pv"><b>${rec}</b> ${signedPts(loss)}</span></div>`;
+      <span class="pg">${k ? `+${hrs(g)}` : ""}</span>
+      <span class="pv">${rec}</span></div>`;
   }).join("");
-  const rough = fit.n < PLAN_ROUGH_NIGHTS ? " Rough until ~15 nights." : "";
-  const stretch = drinks > fit.maxDrinks ? ` More drinks than any night on record — a stretch.` : "";
+  const per = (v) => Math.max(0, Math.round(Math.abs(v)));
+  const caveat = [fit.n < PLAN_ROUGH_NIGHTS && "still rough",
+                  drinks > fit.maxDrinks && "more drinks than you've had before"].filter(Boolean);
   return `<div class="card planner"><h2>Bedtime planner</h2>
-    <p class="readout live"><b>${head}</b><span> · ${tail}</span></p>
-    <p class="plansub">${why}${sub} · expected recovery (sober avg ${Math.round(mean)})</p>
+    <p class="readout live"><b>${head}</b>${tail ? `<span> · ${tail}</span>` : ""}</p>
+    <p class="plansub">${sub}</p>
+    <div class="planhd"><span>Bed at</span><span>Recovery</span></div>
     ${rows}
-    <p class="note">From ${fit.n} drinking nights: each drink ≈ ${signedPts(fit.b)}, each hour waited ≈ ${signedPts(fit.c)}.${rough}${stretch}</p></div>`;
+    <p class="note">A normal night for you is about ${Math.round(mean)}.
+      ${[fit.b > 0 && `Each drink costs ~${per(fit.b)}`, fit.c < 0 && `each hour you wait gets ~${per(fit.c)} back`]
+        .filter(Boolean).join(", ").replace(/^e/, "E")}${fit.b > 0 || fit.c < 0 ? "." : ""}
+      Based on ${fit.n} nights${caveat.length ? ` — ${caveat.join(", ")}` : ""}.</p></div>`;
 }
 
 const RANGE_PRESETS = [7, 14, 30, 90];
