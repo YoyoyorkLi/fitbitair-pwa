@@ -912,57 +912,56 @@ export function doseResponse(W, D) {
 }
 
 /**
- * One dot per drinking night: the hours between your last drink and falling
- * asleep (x) against how far that night's score landed from
- * your sober-night average (y). `pts` come from alcoholTimingPoints() in app.js,
- * already paired by timestamp, so this only draws.
+ * Drinking nights bucketed by the hours between the last drink and falling
+ * asleep. Each row's bar is the average points that bucket's nights landed
+ * below your sober-night average; the dots are the individual nights, so a bar
+ * resting on one night reads as exactly that. `buckets` come from
+ * renderTimingCard() in app.js, already paired by timestamp, so this only draws.
  *
- * The green band is one standard deviation either side of the sober nights --
- * the range a night with no drinks lands in anyway, so a dot inside it is noise.
+ * Loss runs to the right. The green band is one standard deviation either side
+ * of the sober nights -- the spread a night with no drinks shows anyway, so a
+ * bar that ends inside it is not distinguishable from an ordinary night.
  */
-export function alcoholTiming(W, { pts, sd, unit }) {
-  const h = 258, x0 = padL(W) + 6, x1 = W - padR(W) - (narrow(W) ? 4 : 16), y0 = 16, y1 = 196;
-  if (pts.length < 2) {
-    return svg(W, 92, txt(W / 2, 50, "needs a few drinking nights with sleep recorded", { anchor: "middle" }), "no data");
-  }
-  const maxX = Math.max(4, Math.ceil(Math.max(...pts.map((p) => p.gapH))));
-  const ys = pts.map((p) => p.dy);
-  const lo = Math.floor((Math.min(-15, ...ys, -sd) - 4) / 5) * 5, hi = Math.ceil((Math.max(10, ...ys, sd) + 4) / 5) * 5;
-  const X = (v) => x0 + (v / maxX) * (x1 - x0), Y = (v) => y1 - ((v - lo) / (hi - lo)) * (y1 - y0);
+export function gapBars(W, { buckets, sd, metric }) {
+  const total = buckets.reduce((a, b) => a + b.nights.length, 0);
+  if (!total) return svg(W, 92, txt(W / 2, 50, "no drinking nights with sleep recorded yet", { anchor: "middle" }), "no data");
+  const nw = narrow(W), rowH = 42, y0 = 42;
+  const h = y0 + buckets.length * rowH + 40;
+  const lx = nw ? 40 : 50, x0 = lx + 10, x1 = W - padR(W) - (nw ? 58 : 76);
+  const losses = buckets.flatMap((b) => [b.loss, ...b.nights.map((n) => n.loss)]).filter(ok);
+  const lo = Math.floor(Math.min(0, -sd, ...losses) / 5) * 5, hi = Math.ceil(Math.max(10, sd, ...losses) / 5) * 5;
+  const X = (v) => x0 + ((v - lo) / (hi - lo)) * (x1 - x0);
+  const yEnd = y0 + buckets.length * rowH;
+  const signed = (v) => (Math.round(v) === 0 ? "0" : v > 0 ? `−${Math.round(v)}` : `+${Math.round(-v)}`);
+  const fs = nw ? 9.5 : 10.5;
 
-  const N = pts.length;
-  const sx = pts.reduce((a, p) => a + p.gapH, 0), sy = ys.reduce((a, v) => a + v, 0);
-  const sxy = pts.reduce((a, p) => a + p.gapH * p.dy, 0), sxx = pts.reduce((a, p) => a + p.gapH * p.gapH, 0);
-  const den = N * sxx - sx * sx;
-  const m = den > 1e-9 ? (N * sxy - sx * sy) / den : 0, b = (sy - m * sx) / N;
-
-  let dots = "";
-  for (const p of pts) {
-    const x = X(p.gapH);
-    dots += `<circle cx="${x.toFixed(1)}" cy="${Y(p.dy).toFixed(1)}" r="${(3.5 + Math.min(p.drinks, 8) * 0.9).toFixed(1)}"
-      fill="${col("drink")}" opacity=".72" stroke="${col("panel")}" stroke-width="1.5" data-tip="${esc(p.tip)}"/>`;
-  }
-  const fs = narrow(W) ? 9.5 : 11;
-  const body = grid(x0, x1, [y0, y1]) +
-    `<rect x="${x0}" y="${Y(sd).toFixed(1)}" width="${x1 - x0}" height="${(Y(-sd) - Y(sd)).toFixed(1)}" fill="${col("good")}" opacity=".13"/>
-     <line x1="${x0}" y1="${Y(0).toFixed(1)}" x2="${x1}" y2="${Y(0).toFixed(1)}" stroke="${col("muted")}" stroke-width="1.25" stroke-dasharray="5 4" opacity=".8"/>
-     ${txt(x1, Y(sd) - 5, "typical sober night", { size: fs })}` +
-    (N >= 5 ? `<line x1="${X(0)}" y1="${Y(b).toFixed(1)}" x2="${X(maxX)}" y2="${Y(m * maxX + b).toFixed(1)}" stroke="${col("drink")}" stroke-width="2" opacity=".75"
-       data-tip="${esc(`fit|${m.toFixed(1)}${unit} per extra hour`)}"/>` : "") +
-    dots + axis(x0, x1, y1) +
-    Array.from({ length: maxX + 1 }, (_, d) => txt(X(d), y1 + 18, d, { anchor: "middle" })).join("") +
-    [lo, 0, hi].map((v) => txt(x0 - 9, Y(v) + 4, (v > 0 ? "+" : "") + v)).join("") +
-    txt((x0 + x1) / 2, h - 8, "hours from last drink to bedtime", { size: 11, anchor: "middle" });
-  return svg(W, h, body, "Hours from last drink to bedtime against the next score's change from your sober average");
+  let p = `<rect x="${X(Math.max(lo, -sd)).toFixed(1)}" y="${y0}" width="${(X(Math.min(hi, sd)) - X(Math.max(lo, -sd))).toFixed(1)}"
+      height="${yEnd - y0}" fill="${col("good")}" opacity=".13"/>
+    <line x1="${X(0).toFixed(1)}" y1="${y0}" x2="${X(0).toFixed(1)}" y2="${yEnd}" stroke="${col("muted")}" stroke-width="1.25" stroke-dasharray="4 4" opacity=".8"/>
+    ${txt(X(0) + 4, y0 - 8, "typical sober night", { size: fs, anchor: "start" })}
+    ${txt(2, 14, "hours from last drink to bed", { size: fs, anchor: "start" })}`;
+  buckets.forEach((b, i) => {
+    const cy = y0 + i * rowH + rowH / 2;
+    p += txt(lx, cy + 4, b.label, { size: nw ? 11 : 12, fill: "text" });
+    if (!b.nights.length) {
+      p += txt(x0 + 4, cy + 4, "no nights", { size: fs, anchor: "start", fill: "dim" });
+      return;
+    }
+    const xa = Math.min(X(0), X(b.loss)), wBar = Math.abs(X(b.loss) - X(0));
+    p += `<rect x="${xa.toFixed(1)}" y="${(cy - 8).toFixed(1)}" width="${Math.max(wBar, 1.5).toFixed(1)}" height="16" rx="3"
+        fill="${col(b.loss > 0 ? "drink" : "good")}" opacity=".85"
+        data-tip="${esc(`${b.label} before bed|${b.nights.length} night${b.nights.length === 1 ? "" : "s"}, average ${signed(b.loss)} ${metric} vs a sober night`)}"/>`;
+    for (const n of b.nights) {
+      p += `<circle cx="${X(n.loss).toFixed(1)}" cy="${cy.toFixed(1)}" r="3.2" fill="${col("text")}" opacity=".6"
+          stroke="${col("panel")}" stroke-width="1" data-tip="${esc(n.tip)}"/>`;
+    }
+    p += txt(x1 + 10, cy + 4, `<tspan font-weight="600" fill="${col("text")}">${signed(b.loss)}</tspan> · ${b.nights.length}`, { size: nw ? 11 : 12, anchor: "start" });
+  });
+  p += axis(x0, x1, yEnd) +
+    [lo, 0, hi].map((v) => txt(X(v), yEnd + 16, signed(v), { anchor: "middle" })).join("") +
+    txt((x0 + x1) / 2, h - 6, `${metric} vs sober night`, { size: 11, anchor: "middle" });
+  return svg(W, h, p, `Average ${metric} lost against a sober night, by hours between last drink and bedtime`);
 }
-
-/** Least-squares slope of dy on gapH, or NaN when the fit is meaningless. */
-export const timingSlope = (pts) => {
-  const N = pts.length, sx = pts.reduce((a, p) => a + p.gapH, 0), sy = pts.reduce((a, p) => a + p.dy, 0);
-  const sxy = pts.reduce((a, p) => a + p.gapH * p.dy, 0), sxx = pts.reduce((a, p) => a + p.gapH * p.gapH, 0);
-  const den = N * sxx - sx * sx;
-  return N >= 5 && den > 1e-9 ? (N * sxy - sx * sy) / den : NaN;
-};
 
 export const slope = (D) => {
   const { pts, wholeHistoryMean } = pctPoints(D);

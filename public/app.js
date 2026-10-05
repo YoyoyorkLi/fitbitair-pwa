@@ -2023,22 +2023,35 @@ function alcoholTimingPoints(D, metric) {
   return { pts, sd: sd || 5 };
 }
 
+// Hours from last drink to falling asleep. Whole-hour buckets, closed at 3h+:
+// past that a typical evening has few nights per bucket to average.
+const GAP_BUCKETS = [[0, 1, "<1h"], [1, 2, "1–2h"], [2, 3, "2–3h"], [3, Infinity, "3h+"]];
+
 let timingMetric = "recovery";
 function renderTimingCard(D) {
   const { pts, sd } = alcoholTimingPoints(D, timingMetric);
-  const m = ch.timingSlope(pts);
   const label = timingMetric === "score" ? "sleep score" : "recovery";
+  // loss = points below the sober average, so a bad night is positive here
+  const buckets = GAP_BUCKETS.map(([a, b, short]) => {
+    const nights = pts.filter((p) => p.gapH >= a && p.gapH < b).map((p) => ({ loss: -p.dy, tip: p.tip }));
+    const loss = nights.length ? nights.reduce((s, n) => s + n.loss, 0) / nights.length : NaN;
+    return { label: short, nights, loss };
+  });
+  const filled = buckets.filter((b) => b.nights.length);
+  const signed = (v) => (Math.round(v) === 0 ? "±0" : v > 0 ? `−${Math.round(v)}` : `+${Math.round(-v)}`);
+  const first = filled[0], last = filled[filled.length - 1];
+  // Big type, one line: just the two ends. The chart has every bucket.
+  const head = !filled.length ? "No drinking nights yet"
+    : filled.length === 1 ? `${signed(first.loss)} at ${first.label}`
+    : `${signed(first.loss)} at ${first.label} · ${signed(last.loss)} at ${last.label}`;
   $("timing-card").innerHTML = `
     <div class="card"><h2>Drink timing vs next-morning score</h2>
-      <p class="readout live">${ok(m)
-        ? `<b>${m.toFixed(1)} ${label} points per extra hour between last drink and bed</b><span> · ${pts.length} drinking nights</span>`
-        : `<b>Not enough drinking nights for a trend yet</b><span> · ${pts.length} so far</span>`}</p>
+      <p class="readout live"><b>${head}</b><span>${filled.length ? ` ${label} vs sober` : ""} · ${pts.length} drinking night${pts.length === 1 ? "" : "s"}</span></p>
       <div class="range" role="tablist" aria-label="Score">
         ${[["recovery", "Recovery"], ["score", "Sleep score"]].map(([k, t]) =>
           `<button class="rbtn" role="tab" aria-selected="${k === timingMetric}" data-metric="${k}" type="button">${t}</button>`).join("")}
       </div>
-      <div class="chartbox">${ch.alcoholTiming(W, { pts, sd, unit: " pts" })}</div></div>`;
-  primeReadouts($("timing-card"));
+      <div class="chartbox">${ch.gapBars(W, { buckets, sd, metric: label })}</div></div>`;
 }
 
 const RANGE_PRESETS = [7, 14, 30, 90];
