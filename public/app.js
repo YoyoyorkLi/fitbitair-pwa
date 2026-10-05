@@ -1934,6 +1934,7 @@ function renderDrinksTab(D) {
 
   $("drinks").innerHTML = `
     ${nowBlock}
+    ${tn.length ? bedPlanner(D, tn) : ""}
     <div class="calnav">
       <button class="nav" id="drcal-prev" type="button" aria-label="Previous month">‹</button>
       <p class="calmonth">${monthLabel}</p>
@@ -2020,38 +2021,132 @@ function alcoholTimingPoints(D, metric) {
       tip: `${D.dates[n.j]}|${+drinks.toFixed(1)} drinks, last ${lastClock}, bed ${ch.clock12(n.startMin)} (${gapH.toFixed(1)}h later) → ${Math.round(n.v)} (${n.v - mean >= 0 ? "+" : ""}${Math.round(n.v - mean)} vs sober ${Math.round(mean)})`,
     };
   });
-  return { pts, sd: sd || 5 };
+  return { pts, sd: sd || 5, mean };
 }
 
-// Hours from last drink to falling asleep. Whole-hour buckets, closed at 3h+:
-// past that a typical evening has few nights per bucket to average.
+// Grid buckets. Columns: hours from last drink to falling asleep, closed at 3h+
+// because past that a typical evening has few nights per cell. Rows: standard
+// drinks, in pairs -- std_drinks can be fractional (a cocktail is 1.5), so the
+// edges sit on the halves.
 const GAP_BUCKETS = [[0, 1, "<1h"], [1, 2, "1–2h"], [2, 3, "2–3h"], [3, Infinity, "3h+"]];
+const DRINK_BUCKETS = [[0, 2.5, "1–2"], [2.5, 4.5, "3–4"], [4.5, 6.5, "5–6"], [6.5, Infinity, "7+"]];
+const signedPts = (v) => (Math.round(v) === 0 ? "±0" : v > 0 ? `−${Math.round(v)}` : `+${Math.round(-v)}`);
 
 let timingMetric = "recovery";
 function renderTimingCard(D) {
   const { pts, sd } = alcoholTimingPoints(D, timingMetric);
   const label = timingMetric === "score" ? "sleep score" : "recovery";
   // loss = points below the sober average, so a bad night is positive here
-  const buckets = GAP_BUCKETS.map(([a, b, short]) => {
-    const nights = pts.filter((p) => p.gapH >= a && p.gapH < b).map((p) => ({ loss: -p.dy, tip: p.tip }));
-    const loss = nights.length ? nights.reduce((s, n) => s + n.loss, 0) / nights.length : NaN;
-    return { label: short, nights, loss };
-  });
-  const filled = buckets.filter((b) => b.nights.length);
-  const signed = (v) => (Math.round(v) === 0 ? "±0" : v > 0 ? `−${Math.round(v)}` : `+${Math.round(-v)}`);
-  const first = filled[0], last = filled[filled.length - 1];
-  // Big type, one line: just the two ends. The chart has every bucket.
-  const head = !filled.length ? "No drinking nights yet"
-    : filled.length === 1 ? `${signed(first.loss)} at ${first.label}`
-    : `${signed(first.loss)} at ${first.label} · ${signed(last.loss)} at ${last.label}`;
+  let worst = null;
+  const cells = DRINK_BUCKETS.map(([r0, r1, rl]) => GAP_BUCKETS.map(([c0, c1, cl]) => {
+    const ns = pts.filter((p) => p.drinks >= r0 && p.drinks < r1 && p.gapH >= c0 && p.gapH < c1);
+    const loss = ns.length ? -ns.reduce((a, p) => a + p.dy, 0) / ns.length : NaN;
+    if (ns.length && (!worst || loss > worst.loss)) worst = { loss, at: `${rl} drinks, ${cl}` };
+    return { n: ns.length, loss };
+  }));
   $("timing-card").innerHTML = `
-    <div class="card"><h2>Drink timing vs next-morning score</h2>
-      <p class="readout live"><b>${head}</b><span>${filled.length ? ` ${label} vs sober` : ""} · ${pts.length} drinking night${pts.length === 1 ? "" : "s"}</span></p>
+    <div class="card"><h2>Drinks × timing vs next-morning score</h2>
+      <p class="readout live">${worst
+        ? `<b>${signedPts(worst.loss)} at ${worst.at}</b><span> worst · ${pts.length} drinking night${pts.length === 1 ? "" : "s"}</span>`
+        : `<b>No drinking nights yet</b>`}</p>
       <div class="range" role="tablist" aria-label="Score">
         ${[["recovery", "Recovery"], ["score", "Sleep score"]].map(([k, t]) =>
           `<button class="rbtn" role="tab" aria-selected="${k === timingMetric}" data-metric="${k}" type="button">${t}</button>`).join("")}
       </div>
-      <div class="chartbox">${ch.gapBars(W, { buckets, sd, metric: label })}</div></div>`;
+      <div class="chartbox">${ch.drinkGapGrid(W, {
+        rows: DRINK_BUCKETS.map((b) => b[2]), cols: GAP_BUCKETS.map((b) => b[2]), cells, sd, metric: label })}</div></div>`;
+}
+
+// ---------------------------------------------------------- bedtime planner
+// One least-squares fit over every paired drinking night:
+//   recovery lost vs sober = a + b * drinks + c * hours from last drink to bed
+// Linear and additive on purpose -- with a few dozen nights anything with more
+// knobs would fit the noise. Below PLAN_MIN_NIGHTS it isn't shown at all, and
+// below PLAN_ROUGH_NIGHTS it says it's rough.
+const PLAN_MIN_NIGHTS = 5;
+const PLAN_ROUGH_NIGHTS = 15;
+
+function fitDrinkGap(pts) {
+  if (pts.length < PLAN_MIN_NIGHTS) return null;
+  const A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], y = [0, 0, 0];
+  for (const p of pts) {
+    const v = [1, p.drinks, p.gapH], loss = -p.dy;
+    for (let i = 0; i < 3; i++) { y[i] += v[i] * loss; for (let j = 0; j < 3; j++) A[i][j] += v[i] * v[j]; }
+  }
+  // Gaussian elimination with partial pivoting; a 3x3 needs nothing fancier.
+  for (let i = 0; i < 3; i++) {
+    let piv = i;
+    for (let k = i + 1; k < 3; k++) if (Math.abs(A[k][i]) > Math.abs(A[piv][i])) piv = k;
+    [A[i], A[piv]] = [A[piv], A[i]]; [y[i], y[piv]] = [y[piv], y[i]];
+    if (Math.abs(A[i][i]) < 1e-9) return null;      // every night the same drinks or gap
+    for (let k = i + 1; k < 3; k++) {
+      const f = A[k][i] / A[i][i];
+      for (let j = i; j < 3; j++) A[k][j] -= f * A[i][j];
+      y[k] -= f * y[i];
+    }
+  }
+  const c = [0, 0, 0];
+  for (let i = 2; i >= 0; i--) { let t = y[i]; for (let j = i + 1; j < 3; j++) t -= A[i][j] * c[j]; c[i] = t / A[i][i]; }
+  return {
+    a: c[0], b: c[1], c: c[2], n: pts.length,
+    maxGap: Math.max(...pts.map((p) => p.gapH)), maxDrinks: Math.max(...pts.map((p) => p.drinks)),
+  };
+}
+
+// Tonight's drinks in, a bedtime out: the earliest bed (after the last drink so
+// far) whose predicted recovery lands back inside the sober nights' normal
+// spread. Never extrapolates past the longest gap the history actually has.
+function bedPlanner(D, tn) {
+  const { pts, sd, mean } = alcoholTimingPoints(D, "recovery");
+  const fit = fitDrinkGap(pts);
+  const drinks = tn.reduce((a, r) => a + (Number(r.std_drinks) || 1), 0);
+  const last = tn[tn.length - 1].logged_at;
+  const time12 = (d) => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  const sub = `${+drinks.toFixed(1)} drink${drinks === 1 ? "" : "s"}, last at ${time12(last)}`;
+  if (!fit) {
+    return `<div class="card planner"><h2>Bedtime planner</h2>
+      <p class="readout live"><b>Not enough nights yet</b><span> · ${sub}</span></p>
+      <p class="note">Needs ${PLAN_MIN_NIGHTS} drinking nights with sleep recorded to estimate — ${pts.length} so far.</p></div>`;
+  }
+  const lossAt = (g) => fit.a + fit.b * drinks + fit.c * g;
+  const hrs = (h) => { const m = Math.round(h * 60); return m % 60 ? shortDur(m) : `${m / 60}h`; };
+  const elapsed = Math.max(0, (Date.now() - last.getTime()) / 3600e3);
+  const bedAt = (g) => new Date(last.getTime() + g * 3600e3);
+  // head/tail share the one-line readout, so tail stays short; anything longer
+  // goes in `why` under it.
+  let head, tail, why = "";
+  if (lossAt(elapsed) <= sd) {
+    head = "Bed any time"; tail = "within a normal night";
+  } else if (fit.c >= 0) {
+    head = "Waiting won't help much"; tail = `expect ${signedPts(lossAt(elapsed))}`;
+    why = "In your nights so far, drink count is what moved recovery, not the gap. ";
+  } else {
+    const g = Math.ceil(((sd - fit.a - fit.b * drinks) / fit.c) * 4) / 4;   // to the quarter hour
+    if (g > fit.maxGap + 0.25) {
+      head = "Not back to normal tonight"; tail = `best ${signedPts(lossAt(fit.maxGap))}`;
+      why = `Even ${hrs(fit.maxGap)} after the last drink — the longest gap you have on record. `;
+    } else {
+      head = `Bed after ${time12(bedAt(g))}`; tail = `wait ${hrs(g)}`;
+    }
+  }
+  // A few concrete options: now, then each whole hour after the last drink,
+  // up to the longest gap the history covers.
+  const opts = [elapsed];
+  for (let h = Math.floor(elapsed) + 1; h <= Math.min(fit.maxGap, elapsed + 3.5) && opts.length < 4; h++) opts.push(h);
+  const rows = opts.map((g, k) => {
+    const loss = lossAt(g), rec = Math.round(Math.min(100, Math.max(0, mean - loss)));
+    const good = loss <= sd;
+    return `<div class="planrow${good ? " ok" : ""}"><span class="pl">${k ? `${time12(bedAt(g))}` : "Now"}</span>
+      <span class="pg">${k ? `${hrs(g)} after last` : g < 5 / 60 ? "just had one" : `${hrs(g)} since last`}</span>
+      <span class="pv"><b>${rec}</b> ${signedPts(loss)}</span></div>`;
+  }).join("");
+  const rough = fit.n < PLAN_ROUGH_NIGHTS ? " Rough until ~15 nights." : "";
+  const stretch = drinks > fit.maxDrinks ? ` More drinks than any night on record — a stretch.` : "";
+  return `<div class="card planner"><h2>Bedtime planner</h2>
+    <p class="readout live"><b>${head}</b><span> · ${tail}</span></p>
+    <p class="plansub">${why}${sub} · expected recovery (sober avg ${Math.round(mean)})</p>
+    ${rows}
+    <p class="note">From ${fit.n} drinking nights: each drink ≈ ${signedPts(fit.b)}, each hour waited ≈ ${signedPts(fit.c)}.${rough}${stretch}</p></div>`;
 }
 
 const RANGE_PRESETS = [7, 14, 30, 90];

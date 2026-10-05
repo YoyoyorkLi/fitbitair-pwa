@@ -307,6 +307,17 @@ a{color:var(--accent)}
   border-radius:5px;padding:9px 10px 9px 13px;margin-bottom:6px;font-size:14px}
 .nowrow .nown{color:var(--dim);font-variant-numeric:tabular-nums;min-width:14px}
 .nowrow .nowt{color:var(--text);font-weight:500;flex:1;font-variant-numeric:tabular-nums}
+/* Bedtime planner (Drinks tab): one row per candidate bedtime. Green-edged when
+   the predicted recovery is back inside the sober nights' normal spread. */
+.planner{margin-bottom:22px}
+.plansub{margin:-4px 0 10px;font-size:12.5px;color:var(--muted)}
+.planrow{display:flex;align-items:baseline;gap:10px;background:var(--panel2);border-left:3px solid var(--drink);
+  border-radius:5px;padding:9px 12px;margin-bottom:6px;font-size:14px;font-variant-numeric:tabular-nums}
+.planrow.ok{border-left-color:var(--good)}
+.planrow .pl{color:var(--text);font-weight:500;min-width:72px}
+.planrow .pg{color:var(--muted);flex:1;font-size:12.5px}
+.planrow .pv{color:var(--muted);font-size:12.5px}
+.planrow .pv b{color:var(--text);font-size:15px;margin-right:4px}
 .nowdel{background:none;border:1px solid var(--grid);color:var(--muted);border-radius:6px;
   width:32px;height:32px;font-size:16px;line-height:1;flex:none;
   -webkit-tap-highlight-color:transparent}

@@ -911,56 +911,53 @@ export function doseResponse(W, D) {
   return svg(W, h, p, "Drinks against next-morning HRV as a percentage of baseline");
 }
 
-/**
- * Drinking nights bucketed by the hours between the last drink and falling
- * asleep. Each row's bar is the average points that bucket's nights landed
- * below your sober-night average; the dots are the individual nights, so a bar
- * resting on one night reads as exactly that. `buckets` come from
- * renderTimingCard() in app.js, already paired by timestamp, so this only draws.
- *
- * Loss runs to the right. The green band is one standard deviation either side
- * of the sober nights -- the spread a night with no drinks shows anyway, so a
- * bar that ends inside it is not distinguishable from an ordinary night.
- */
-export function gapBars(W, { buckets, sd, metric }) {
-  const total = buckets.reduce((a, b) => a + b.nights.length, 0);
-  if (!total) return svg(W, 92, txt(W / 2, 50, "no drinking nights with sleep recorded yet", { anchor: "middle" }), "no data");
-  const nw = narrow(W), rowH = 42, y0 = 42;
-  const h = y0 + buckets.length * rowH + 40;
-  const lx = nw ? 40 : 50, x0 = lx + 10, x1 = W - padR(W) - (nw ? 58 : 76);
-  const losses = buckets.flatMap((b) => [b.loss, ...b.nights.map((n) => n.loss)]).filter(ok);
-  const lo = Math.floor(Math.min(0, -sd, ...losses) / 5) * 5, hi = Math.ceil(Math.max(10, sd, ...losses) / 5) * 5;
-  const X = (v) => x0 + ((v - lo) / (hi - lo)) * (x1 - x0);
-  const yEnd = y0 + buckets.length * rowH;
-  const signed = (v) => (Math.round(v) === 0 ? "0" : v > 0 ? `−${Math.round(v)}` : `+${Math.round(-v)}`);
-  const fs = nw ? 9.5 : 10.5;
+// "#C4862E" + "#F2545B" at t -> "#xxxxxx". Only the drink-grid needs a blend.
+const mixHex = (a, b, t) => "#" + [1, 3, 5].map((i) => {
+  const x = parseInt(a.slice(i, i + 2), 16), y = parseInt(b.slice(i, i + 2), 16);
+  return Math.round(x + (y - x) * t).toString(16).padStart(2, "0");
+}).join("");
 
-  let p = `<rect x="${X(Math.max(lo, -sd)).toFixed(1)}" y="${y0}" width="${(X(Math.min(hi, sd)) - X(Math.max(lo, -sd))).toFixed(1)}"
-      height="${yEnd - y0}" fill="${col("good")}" opacity=".13"/>
-    <line x1="${X(0).toFixed(1)}" y1="${y0}" x2="${X(0).toFixed(1)}" y2="${yEnd}" stroke="${col("muted")}" stroke-width="1.25" stroke-dasharray="4 4" opacity=".8"/>
-    ${txt(X(0) + 4, y0 - 8, "typical sober night", { size: fs, anchor: "start" })}
-    ${txt(2, 14, "hours from last drink to bed", { size: fs, anchor: "start" })}`;
-  buckets.forEach((b, i) => {
-    const cy = y0 + i * rowH + rowH / 2;
-    p += txt(lx, cy + 4, b.label, { size: nw ? 11 : 12, fill: "text" });
-    if (!b.nights.length) {
-      p += txt(x0 + 4, cy + 4, "no nights", { size: fs, anchor: "start", fill: "dim" });
-      return;
-    }
-    const xa = Math.min(X(0), X(b.loss)), wBar = Math.abs(X(b.loss) - X(0));
-    p += `<rect x="${xa.toFixed(1)}" y="${(cy - 8).toFixed(1)}" width="${Math.max(wBar, 1.5).toFixed(1)}" height="16" rx="3"
-        fill="${col(b.loss > 0 ? "drink" : "good")}" opacity=".85"
-        data-tip="${esc(`${b.label} before bed|${b.nights.length} night${b.nights.length === 1 ? "" : "s"}, average ${signed(b.loss)} ${metric} vs a sober night`)}"/>`;
-    for (const n of b.nights) {
-      p += `<circle cx="${X(n.loss).toFixed(1)}" cy="${cy.toFixed(1)}" r="3.2" fill="${col("text")}" opacity=".6"
-          stroke="${col("panel")}" stroke-width="1" data-tip="${esc(n.tip)}"/>`;
-    }
-    p += txt(x1 + 10, cy + 4, `<tspan font-weight="600" fill="${col("text")}">${signed(b.loss)}</tspan> · ${b.nights.length}`, { size: nw ? 11 : 12, anchor: "start" });
+/**
+ * Drinking nights in a drinks x timing grid: rows are how much you drank,
+ * columns the hours from last drink to falling asleep. Each cell is the average
+ * points that cell's nights landed below your sober-night average, with the
+ * night count under it, so a cell resting on one night says so.
+ *
+ * Green is a cell inside one standard deviation of the sober nights -- the
+ * spread a night with no drinks shows anyway. Past that it runs amber to red.
+ * `cells` comes from renderTimingCard() in app.js; this only draws.
+ */
+export function drinkGapGrid(W, { rows, cols, cells, sd, metric }) {
+  if (!cells.some((r) => r.some((c) => c.n))) {
+    return svg(W, 92, txt(W / 2, 50, "no drinking nights with sleep recorded yet", { anchor: "middle" }), "no data");
+  }
+  const nw = narrow(W), lw = nw ? 34 : 46, gap = 4, top = 22, cellH = nw ? 48 : 52;
+  const x0 = lw + 8, cw = (W - x0 - padR(W) - gap * (cols.length - 1)) / cols.length;
+  const h = top + rows.length * (cellH + gap) + 30;
+  const signed = (v) => (Math.round(v) === 0 ? "±0" : v > 0 ? `−${Math.round(v)}` : `+${Math.round(-v)}`);
+  let p = txt(lw, top - 8, "drinks", { size: nw ? 9.5 : 10.5 }) +
+    cols.map((c, j) => txt(x0 + j * (cw + gap) + cw / 2, top - 8, c, { anchor: "middle", size: nw ? 10.5 : 11.5 })).join("");
+  rows.forEach((rl, i) => {
+    const y = top + i * (cellH + gap);
+    p += txt(lw, y + cellH / 2 + 4, rl, { size: nw ? 11 : 12, fill: "text" });
+    cols.forEach((cl, j) => {
+      const x = x0 + j * (cw + gap), c = cells[i][j];
+      if (!c.n) {
+        p += `<rect x="${x.toFixed(1)}" y="${y}" width="${cw.toFixed(1)}" height="${cellH}" rx="6" fill="none"
+            stroke="${col("grid")}" stroke-dasharray="3 3"/>` + txt(x + cw / 2, y + cellH / 2 + 4, "—", { anchor: "middle", fill: "dim" });
+        return;
+      }
+      const t = Math.min(1, Math.max(0, (c.loss - sd) / 30));
+      const fill = c.loss <= sd ? col("good") : mixHex(col("drink"), col("warn"), t);
+      const op = c.loss <= sd ? 0.28 : 0.45 + 0.5 * t;
+      p += `<rect x="${x.toFixed(1)}" y="${y}" width="${cw.toFixed(1)}" height="${cellH}" rx="6" fill="${fill}" opacity="${op.toFixed(2)}"
+          data-tip="${esc(`${signed(c.loss)} ${metric}|${rl} drinks, last drink ${cl} before bed · ${c.n} night${c.n === 1 ? "" : "s"} vs a sober night`)}"/>` +
+        `<g pointer-events="none">${txt(x + cw / 2, y + cellH / 2 + 1, signed(c.loss), { anchor: "middle", size: nw ? 14 : 15, fill: "text", weight: 600 })}
+         ${txt(x + cw / 2, y + cellH / 2 + 16, `${c.n} night${c.n === 1 ? "" : "s"}`, { anchor: "middle", size: nw ? 9.5 : 10, fill: "text" })}</g>`;
+    });
   });
-  p += axis(x0, x1, yEnd) +
-    [lo, 0, hi].map((v) => txt(X(v), yEnd + 16, signed(v), { anchor: "middle" })).join("") +
-    txt((x0 + x1) / 2, h - 6, `${metric} vs sober night`, { size: 11, anchor: "middle" });
-  return svg(W, h, p, `Average ${metric} lost against a sober night, by hours between last drink and bedtime`);
+  p += txt(x0 + (W - x0 - padR(W)) / 2, h - 8, "hours from last drink to bed →", { size: 11, anchor: "middle" });
+  return svg(W, h, p, `Average ${metric} lost against a sober night by drink count and hours from last drink to bed`);
 }
 
 export const slope = (D) => {
