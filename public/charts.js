@@ -912,7 +912,7 @@ export function doseResponse(W, D) {
 }
 
 /**
- * One dot per drinking night: how much alcohol was still on board when you fell
+ * One dot per drinking night: how much alcohol was still in your system when you fell
  * asleep (x, in standard drinks) against how far that night's score landed from
  * your sober-night average (y). `pts` come from alcoholTimingPoints() in app.js,
  * already paired by timestamp, so this only draws.
@@ -953,12 +953,12 @@ export function alcoholTiming(W, { pts, sd, unit }) {
      <line x1="${x0}" y1="${Y(0).toFixed(1)}" x2="${x1}" y2="${Y(0).toFixed(1)}" stroke="${col("muted")}" stroke-width="1.25" stroke-dasharray="5 4" opacity=".8"/>
      ${txt(x1, Y(sd) - 5, "typical sober night", { size: fs })}` +
     (N >= 5 ? `<line x1="${X(0)}" y1="${Y(b).toFixed(1)}" x2="${X(maxX)}" y2="${Y(m * maxX + b).toFixed(1)}" stroke="${col("drink")}" stroke-width="2" opacity=".75"
-       data-tip="${esc(`fit|${m.toFixed(1)}${unit} per drink still on board`)}"/>` : "") +
+       data-tip="${esc(`fit|${m.toFixed(1)}${unit} per drink still in system`)}"/>` : "") +
     dots + axis(x0, x1, y1) +
     Array.from({ length: maxX + 1 }, (_, d) => txt(X(d), y1 + 18, d, { anchor: "middle" })).join("") +
     [lo, 0, hi].map((v) => txt(x0 - 9, Y(v) + 4, (v > 0 ? "+" : "") + v)).join("") +
-    txt((x0 + x1) / 2, h - 8, "standard drinks still on board at bedtime", { size: 11, anchor: "middle" });
-  return svg(W, h, body, "Alcohol still on board at bedtime against the next score's change from your sober average");
+    txt((x0 + x1) / 2, h - 8, "standard drinks still in system at bedtime", { size: 11, anchor: "middle" });
+  return svg(W, h, body, "Alcohol still in system at bedtime against the next score's change from your sober average");
 }
 
 /** Least-squares slope of dy on onBoard, or NaN when the fit is meaningless. */

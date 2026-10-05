@@ -1968,7 +1968,7 @@ function renderTrends(D) {
   renderTrendCharts(D, pickDefaultRange(D));
 }
 
-// ------------------------------------------------- alcohol on board at bedtime
+// ------------------------------------------------- alcohol in system at bedtime
 // Standard drinks the body clears per hour. A rule of thumb (~one drink an
 // hour), not a measurement -- it only has to rank nights, so one constant.
 const CLEAR_PER_HOUR = 1;
@@ -2025,7 +2025,7 @@ function alcoholTimingPoints(D, metric) {
     const lastClock = ch.clock12(((last.at % 1440) + 1440) % 1440);
     return {
       onBoard: n.onBoard, drinks, dy: n.v - mean,
-      tip: `${D.dates[n.j]}|${+drinks.toFixed(1)} drinks, last ${lastClock}, bed ${ch.clock12(n.startMin)} (${gapH.toFixed(1)}h later) → ${+n.onBoard.toFixed(1)} on board, ${Math.round(n.v)} (${n.v - mean >= 0 ? "+" : ""}${Math.round(n.v - mean)} vs sober ${Math.round(mean)})`,
+      tip: `${D.dates[n.j]}|${+drinks.toFixed(1)} drinks, last ${lastClock}, bed ${ch.clock12(n.startMin)} (${gapH.toFixed(1)}h later) → ${+n.onBoard.toFixed(1)} in system, ${Math.round(n.v)} (${n.v - mean >= 0 ? "+" : ""}${Math.round(n.v - mean)} vs sober ${Math.round(mean)})`,
     };
   });
   return { pts, sd: sd || 5 };
@@ -2039,7 +2039,7 @@ function renderTimingCard(D) {
   $("timing-card").innerHTML = `
     <div class="card"><h2>Drink timing vs next-morning score</h2>
       <p class="readout live">${ok(m)
-        ? `<b>${m.toFixed(1)} ${label} points per drink still on board at bedtime</b><span> · ${pts.length} drinking nights</span>`
+        ? `<b>${m.toFixed(1)} ${label} points per drink still in system at bedtime</b><span> · ${pts.length} drinking nights</span>`
         : `<b>Not enough drinking nights for a trend yet</b><span> · ${pts.length} so far</span>`}</p>
       <div class="range" role="tablist" aria-label="Score">
         ${[["recovery", "Recovery"], ["score", "Sleep score"]].map(([k, t]) =>
