@@ -931,12 +931,14 @@ export function drinkGapGrid(W, { rows, cols, cells, sd, metric }) {
   if (!cells.some((r) => r.some((c) => c.n))) {
     return svg(W, 92, txt(W / 2, 50, "no drinking nights with sleep recorded yet", { anchor: "middle" }), "no data");
   }
-  const nw = narrow(W), lw = nw ? 34 : 46, gap = 4, top = 22, cellH = nw ? 48 : 52;
+  const nw = narrow(W), lw = nw ? 34 : 46, gap = 4, top = 18, cellH = nw ? 48 : 52;
   const x0 = lw + 8, cw = (W - x0 - padR(W) - gap * (cols.length - 1)) / cols.length;
-  const h = top + rows.length * (cellH + gap) + 30;
+  const yEnd = top + rows.length * (cellH + gap) - gap, h = yEnd + 46;
   const signed = (v) => (Math.round(v) === 0 ? "±0" : v > 0 ? `−${Math.round(v)}` : `+${Math.round(-v)}`);
-  let p = txt(lw, top - 8, "drinks", { size: nw ? 9.5 : 10.5 }) +
-    cols.map((c, j) => txt(x0 + j * (cw + gap) + cw / 2, top - 8, c, { anchor: "middle", size: nw ? 10.5 : 11.5 })).join("");
+  // Drinks label over the row labels; the gap columns are labelled along the
+  // bottom, where an x-axis reads.
+  let p = txt(lw, top - 7, "drinks", { size: nw ? 9.5 : 10.5 }) +
+    cols.map((c, j) => txt(x0 + j * (cw + gap) + cw / 2, yEnd + 17, c, { anchor: "middle", size: nw ? 10.5 : 11.5 })).join("");
   rows.forEach((rl, i) => {
     const y = top + i * (cellH + gap);
     p += txt(lw, y + cellH / 2 + 4, rl, { size: nw ? 11 : 12, fill: "text" });
@@ -956,7 +958,7 @@ export function drinkGapGrid(W, { rows, cols, cells, sd, metric }) {
          ${txt(x + cw / 2, y + cellH / 2 + 16, `${c.n} night${c.n === 1 ? "" : "s"}`, { anchor: "middle", size: nw ? 9.5 : 10, fill: "text" })}</g>`;
     });
   });
-  p += txt(x0 + (W - x0 - padR(W)) / 2, h - 8, "hours from last drink to bed →", { size: 11, anchor: "middle" });
+  p += txt(x0 + (W - x0 - padR(W)) / 2, h - 6, "hours from last drink to bed", { size: 11, anchor: "middle" });
   return svg(W, h, p, `Average ${metric} lost against a sober night by drink count and hours from last drink to bed`);
 }
 

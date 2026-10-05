@@ -2045,9 +2045,8 @@ function renderTimingCard(D) {
   }));
   $("timing-card").innerHTML = `
     <div class="card"><h2>Drinks × timing vs next-morning score</h2>
-      <p class="readout live">${worst
-        ? `<b>${signedPts(worst.loss)} at ${worst.at}</b><span> worst · ${pts.length} drinking night${pts.length === 1 ? "" : "s"}</span>`
-        : `<b>No drinking nights yet</b>`}</p>
+      <p class="readout live tight"><b>${worst ? `${signedPts(worst.loss)} at ${worst.at}` : "No drinking nights yet"}</b></p>
+      ${worst ? `<p class="subline">Worst combo vs a sober night · ${pts.length} drinking night${pts.length === 1 ? "" : "s"}</p>` : ""}
       <div class="range" role="tablist" aria-label="Score">
         ${[["recovery", "Recovery"], ["score", "Sleep score"]].map(([k, t]) =>
           `<button class="rbtn" role="tab" aria-selected="${k === timingMetric}" data-metric="${k}" type="button">${t}</button>`).join("")}
@@ -2104,7 +2103,7 @@ function bedPlanner(D, tn) {
   const sub = `${+drinks.toFixed(1)} drink${drinks === 1 ? "" : "s"} · last ${time12(last)}`;
   if (!fit) {
     return `<div class="card planner"><h2>Bedtime planner</h2>
-      <p class="readout live"><b>Not enough nights yet</b><span> · ${pts.length} of ${PLAN_MIN_NIGHTS}</span></p></div>`;
+      <p class="readout live tight"><b>Not enough nights yet</b><span> · ${pts.length} of ${PLAN_MIN_NIGHTS}</span></p></div>`;
   }
   const lossAt = (g) => fit.a + fit.b * drinks + fit.c * g;
   const hrs = (h) => { const m = Math.round(h * 60); return m % 60 ? shortDur(m) : `${m / 60}h`; };
@@ -2138,8 +2137,8 @@ function bedPlanner(D, tn) {
   const caveat = [fit.n < PLAN_ROUGH_NIGHTS && "still rough",
                   drinks > fit.maxDrinks && "more drinks than you've had before"].filter(Boolean);
   return `<div class="card planner"><h2>Bedtime planner</h2>
-    <p class="readout live"><b>${head}</b>${tail ? `<span> · ${tail}</span>` : ""}</p>
-    <p class="plansub">${sub}</p>
+    <p class="readout live tight"><b>${head}</b>${tail ? `<span> · ${tail}</span>` : ""}</p>
+    <p class="subline">${sub}</p>
     <div class="planhd"><span>Bed at</span><span>Recovery</span></div>
     ${rows}
     <p class="note">A normal night for you is about ${Math.round(mean)}.
