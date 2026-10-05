@@ -1469,7 +1469,7 @@ async function deleteDrinkById(id) {
 }
 
 // Re-pull just the current drinking-night's drinks and re-render the Drinks
-// tab if they changed. Called when the tab is opened and on foreground, so a
+// tab. Called when the tab is opened and on foreground, so a
 // drink logged on the NFC sticker while the app was elsewhere shows up (and is
 // deletable) without waiting for a full sync. Tag and in-app drinks are the
 // same rows -- source is "nfc" vs "manual" -- so this list carries both.
@@ -1488,11 +1488,10 @@ async function refreshTonight() {
     const next = (rows || [])
       .filter((r) => drinkNightOf(new Date(r.logged_at), tz) === tn)
       .map((r) => ({ id: r.id, logged_at: new Date(r.logged_at), std_drinks: r.std_drinks }));
-    const before = (DATA.tonight || []).map((r) => r.id).join();
-    if (next.map((r) => r.id).join() !== before) {
-      DATA.tonight = next;
-      renderDrinksTab(DATA);
-    }
+    // Re-render even when nothing changed: the bedtime planner's first row is
+    // "if you went to bed now", which moves with the clock.
+    DATA.tonight = next;
+    renderDrinksTab(DATA);
   } finally {
     refreshingTonight = false;
   }
@@ -2129,8 +2128,10 @@ function bedPlanner(D, tn) {
   const rows = opts.map((g, k) => {
     const loss = lossAt(g), rec = Math.round(Math.min(100, Math.max(0, mean - loss)));
     const good = loss <= sd;
-    return `<div class="planrow${good ? " ok" : ""}"><span class="pl">${k ? `${time12(bedAt(g))}` : "Now"}</span>
-      <span class="pg">${k ? `+${hrs(g)}` : ""}</span>
+    // A clock time even for the first row: "Now" read as the last drink's time,
+    // and stayed "Now" on a screen left open for an hour.
+    return `<div class="planrow${good ? " ok" : ""}"><span class="pl">${time12(bedAt(g))}</span>
+      <span class="pg">${g >= 5 / 60 ? `+${hrs(g)}` : ""}</span>
       <span class="pv">${rec}</span></div>`;
   }).join("");
   const per = (v) => Math.max(0, Math.round(Math.abs(v)));
