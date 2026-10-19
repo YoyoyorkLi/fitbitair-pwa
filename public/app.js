@@ -1973,14 +1973,24 @@ function renderTrends(D) {
       <p class="readout live"><b>${perDrink.toFixed(1)}% of baseline HRV per drink</b><span> · ${nights} drinking night${nights === 1 ? "" : "s"}</span></p>
       <div class="chartbox">${ch.doseResponse(W, D)}</div></div>
     <div id="timing-card"></div>
-    <div id="score-gap-card"></div>
+    <div class="card"><h2>Drinks vs next-morning REM</h2>
+      <p class="readout live"><b>${remHead(D)}</b><span> · ${nights} drinking night${nights === 1 ? "" : "s"}</span></p>
+      <div class="chartbox">${ch.remDose(W, D)}</div></div>
     <div class="range" role="tablist" aria-label="Trend window">
       ${RANGE_PRESETS.map((n) => `<button class="rbtn" role="tab" aria-selected="false" data-days="${n}" type="button">${n}d</button>`).join("")}
     </div>
     <div id="trend-cards"></div>`;
   renderTimingCard(D);
-  renderScoreGapCard(D);
   renderTrendCharts(D, pickDefaultRange(D));
+}
+
+// Same pooled-history read as the HRV chart above, in plain REM minutes. The
+// slope is only stated once its 95% interval clears zero.
+function remHead(D) {
+  const { fit } = ch.remFit(D);
+  if (!fit) return "Not enough nights yet";
+  if (!ch.isClear(fit, 1)) return "No clear trend yet";
+  return `${fit.b[1] >= 0 ? "+" : "−"}${Math.abs(fit.b[1]).toFixed(1)} min REM per drink`;
 }
 
 // ------------------------------------------------- last drink -> bedtime gap
@@ -2075,32 +2085,6 @@ function renderTimingCard(D) {
       </div>
       <div class="chartbox">${ch.drinkGapGrid(W, {
         rows: DRINK_BUCKETS.map((b) => b[2]), cols: GAP_BUCKETS.map((b) => b[2]), cells, sd, metric: label })}</div></div>`;
-}
-
-// Sleep score against the last-drink-to-bed gap, dot size = drinks. The
-// headline only states a slope once its 95% interval clears zero; until then
-// it says so, because a line through a few nights is mostly the heaviest one.
-// Own toggle state, independent of the grid's: flipping one card shouldn't
-// silently redraw the other. Opens on sleep score, which it was built around.
-let scoreGapMetric = "score";
-function renderScoreGapCard(D) {
-  const { pts, sd, mean } = alcoholTimingPoints(D, scoreGapMetric);
-  const label = scoreGapMetric === "score" ? "sleep score" : "recovery";
-  const fit = pts.length >= 3 ? ch.ols(pts.map((p) => [1, p.gapH]), pts.map((p) => p.v)) : null;
-  const avg = pts.length ? Math.round(pts.reduce((a, p) => a + p.v, 0) / pts.length) : NaN;
-  const head = !pts.length ? "No drinking nights yet"
-    : !fit ? "Not enough nights yet"
-    : ch.isClear(fit, 1) ? `${fit.b[1] >= 0 ? "+" : "−"}${Math.abs(fit.b[1]).toFixed(1)} per hour later to bed`
-    : "No clear trend yet";
-  $("score-gap-card").innerHTML = `
-    <div class="card"><h2>${scoreGapMetric === "score" ? "Sleep score" : "Recovery"} vs drink timing</h2>
-      <p class="readout live tight"><b>${head}</b></p>
-      ${pts.length ? `<p class="subline">${pts.length} drinking night${pts.length === 1 ? "" : "s"} · avg ${avg} vs ${Math.round(mean)} sober · bigger dot = more drinks</p>` : ""}
-      <div class="range" role="tablist" aria-label="Score">
-        ${[["recovery", "Recovery"], ["score", "Sleep score"]].map(([k, t]) =>
-          `<button class="rbtn" role="tab" aria-selected="${k === scoreGapMetric}" data-sg-metric="${k}" type="button">${t}</button>`).join("")}
-      </div>
-      <div class="chartbox">${ch.scoreGapScatter(W, { pts, mean, sd, metric: label })}</div></div>`;
 }
 
 // ---------------------------------------------------------- bedtime planner
@@ -2266,7 +2250,6 @@ $("trends").addEventListener("click", (e) => {
   const b = e.target.closest(".rbtn");
   if (!b || !DATA) return;
   if (b.dataset.metric) { timingMetric = b.dataset.metric; renderTimingCard(DATA); return; }
-  if (b.dataset.sgMetric) { scoreGapMetric = b.dataset.sgMetric; renderScoreGapCard(DATA); return; }
   renderTrendCharts(DATA, Number(b.dataset.days));
 });
 
