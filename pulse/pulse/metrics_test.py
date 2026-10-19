@@ -289,6 +289,33 @@ def nap_sessions_are_what_main_sleeps_rejects():
     assert one["stages"][0]["a"] == 0 and one["stages"][-1]["b"] > one["stages"][0]["b"], one["stages"]
 
 
+@case
+def duplicate_workouts_collapse_to_one():
+    """The same run sent twice becomes one row -- the copy with zone data --
+    while two back-to-back runs (a real interval session) both survive."""
+    def ex(typ, start, end, *, peak=None):
+        hrz = {"peakTime": f"{peak * 60}s"} if peak else {}
+        return {"exercise": {
+            "exerciseType": typ,
+            "interval": {"startTime": start, "endTime": end},
+            "metricsSummary": {"heartRateZoneDurations": hrz}}}
+
+    pts = [
+        ex("RUNNING", "2026-10-09T21:36:00Z", "2026-10-09T22:35:00Z"),            # 59 min, no zones
+        ex("RUNNING", "2026-10-09T21:36:00Z", "2026-10-09T22:32:00Z", peak=55),   # 56 min, zones
+        ex("WALKING", "2026-10-09T21:40:00Z", "2026-10-09T22:00:00Z"),            # other type: kept
+        ex("RUNNING", "2026-10-06T19:15:00Z", "2026-10-06T19:26:00Z"),
+        ex("RUNNING", "2026-10-06T19:26:00Z", "2026-10-06T19:40:00Z"),            # touches, no overlap
+    ]
+    out = mx.normalize_exercise(pts)
+    runs_oct9 = [w for w in out if w["type"] == "RUNNING" and w["start"].day == 9]
+    assert len(runs_oct9) == 1, runs_oct9
+    assert runs_oct9[0]["zones"]["peak"] == 55, runs_oct9[0]
+    assert sum(w["type"] == "WALKING" for w in out) == 1
+    assert sum(w["type"] == "RUNNING" and w["start"].day == 6 for w in out) == 2
+    assert [w["start"] for w in out] == sorted(w["start"] for w in out)
+
+
 def _nap_fixture():
     """16 slightly-short nights and one 100-min nap on the afternoon of night 10."""
     base = pd.Timestamp("2026-08-20 23:15:00")

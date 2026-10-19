@@ -338,6 +338,28 @@ def _spo2_bounds(con):
     return out
 
 
+def _stored_nadir_minutes(since):
+    """{night -> minutes from sleep onset to HR nadir} for nights already in
+    Supabase, from `since` on. {} without credentials (local/demo runs) or if
+    the read fails -- this only feeds a display baseline, never worth a
+    failed sync."""
+    _load_local_env()
+    url = (os.getenv("SUPABASE_URL") or "").rstrip("/").removesuffix("/rest/v1")
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
+    if not url or not key:
+        return {}
+    path = ("/rest/v1/nights?select=night,sleep_start,hr_nadir_at"
+            f"&night=gte.{since:%Y-%m-%d}&sleep_start=not.is.null&hr_nadir_at=not.is.null")
+    try:
+        rows = _request(url, key, path, method="GET") or []
+    except RuntimeError as e:
+        print(f"warning: could not read stored nadir history: {e}")
+        return {}
+    return {pd.Timestamp(r["night"]):
+            (pd.Timestamp(r["hr_nadir_at"]) - pd.Timestamp(r["sleep_start"])).total_seconds() / 60
+            for r in rows}
+
+
 def build_rows(con=None):
     """Every night we can compute, shaped for the nights table."""
     own = con is None
@@ -409,6 +431,13 @@ def build_rows(con=None):
             mtn = float((pd.Timestamp(na) - pd.Timestamp(start)).total_seconds() / 60)
         nadir[night] = (nb, na, mtn)
     nadir_min_series = {k: v[2] for k, v in nadir.items() if v[2] is not None}
+    # The hourly sync only holds ~5 days of heart-rate, so the local series
+    # alone gave a "baseline" of 3 nights. Fill the rest of the window from
+    # what earlier runs already stored; local values win where both exist.
+    if nadir:
+        since = min(nadir) - pd.Timedelta(days=cfg.BASELINE_DAYS)
+        for k, v in _stored_nadir_minutes(since).items():
+            nadir_min_series.setdefault(k, v)
 
     rows = []
     for _, r in m.iterrows():

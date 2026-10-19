@@ -349,7 +349,31 @@ def normalize_exercise(points):
             "azm": _f(ms.get("activeZoneMinutes")),
             "zones": zones,
         })
-    return sorted(out, key=lambda w: w["start"])
+    return _drop_duplicate_sessions(sorted(out, key=lambda w: w["start"]))
+
+
+def _drop_duplicate_sessions(sessions):
+    """Google sometimes returns the same workout twice (a live account had a
+    10 km run at 16:36 as two RUNNING rows, 56 and 59 min, one with no zone
+    data). Same type and overlapping by at least half the shorter one -> one
+    session. Keep the copy with zone data, else the longer one. Back-to-back
+    sessions that merely touch are both kept. `sessions` must be start-sorted."""
+    kept = []
+    for s in sessions:
+        for i, k in enumerate(kept):
+            if k["type"] != s["type"]:
+                continue
+            overlap = (min(k["end"], s["end"]) - max(k["start"], s["start"])).total_seconds()
+            shorter = min((k["end"] - k["start"]).total_seconds(),
+                          (s["end"] - s["start"]).total_seconds())
+            if overlap >= 0.5 * shorter:
+                rank = lambda w: (any(w["zones"].values()), w["active_min"])  # noqa: E731
+                if rank(s) > rank(k):
+                    kept[i] = s
+                break
+        else:
+            kept.append(s)
+    return sorted(kept, key=lambda w: w["start"])
 
 
 def main_sleeps(nights):
