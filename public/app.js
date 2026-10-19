@@ -1962,29 +1962,38 @@ function renderDrinksTab(D) {
 // history is always better for a fit, so it stays outside the range toggle
 // below. The four trend charts are windowed reads of the *same* day-count.
 function renderTrends(D) {
-  const { m: perDrink } = ch.slope(D);
-  const nights = D.drinks.filter(Boolean).length;
-  // Hand-built rather than card(): the prose under every chart is gone, but the
-  // fitted slope is the one number this whole project exists to produce, so it
-  // gets the readout treatment the scrubbable charts get -- a value line, not a
-  // paragraph. Losing it with the prose would have been the one real casualty.
   $("trends").innerHTML = `
-    <div class="card"><h2>Drinks vs next-morning HRV</h2>
-      <p class="readout live"><b>${perDrink.toFixed(1)}% of baseline HRV per drink</b><span> · ${nights} drinking night${nights === 1 ? "" : "s"}</span></p>
-      <div class="chartbox">${ch.doseResponse(W, D)}</div></div>
+    <div id="dose-card"></div>
     <div id="timing-card"></div>
-    <div class="card"><h2>Drinks vs next-morning REM</h2>
-      <p class="readout live"><b>${remHead(D)}</b><span> · ${nights} drinking night${nights === 1 ? "" : "s"}</span></p>
-      <div class="chartbox">${ch.remDose(W, D)}</div></div>
     <div class="range" role="tablist" aria-label="Trend window">
       ${RANGE_PRESETS.map((n) => `<button class="rbtn" role="tab" aria-selected="false" data-days="${n}" type="button">${n}d</button>`).join("")}
     </div>
     <div id="trend-cards"></div>`;
+  renderDoseCard(D);
   renderTimingCard(D);
   renderTrendCharts(D, pickDefaultRange(D));
 }
 
-// Same pooled-history read as the HRV chart above, in plain REM minutes. The
+// Hand-built rather than card(): the prose under every chart is gone, but the
+// fitted slope is the one number this whole project exists to produce, so it
+// gets the readout treatment the scrubbable charts get -- a value line, not a
+// paragraph. HRV and REM share one card behind a toggle; opens on HRV.
+let doseMetric = "hrv";
+function renderDoseCard(D) {
+  const nights = D.drinks.filter(Boolean).length;
+  const hrv = doseMetric === "hrv";
+  const head = hrv ? `${ch.slope(D).m.toFixed(1)}% of baseline HRV per drink` : remHead(D);
+  $("dose-card").innerHTML = `
+    <div class="card"><h2>Drinks vs next-morning ${hrv ? "HRV" : "REM"}</h2>
+      <p class="readout live"><b>${head}</b><span> · ${nights} drinking night${nights === 1 ? "" : "s"}</span></p>
+      <div class="range" role="tablist" aria-label="Measure">
+        ${[["hrv", "HRV"], ["rem", "REM"]].map(([k, t]) =>
+          `<button class="rbtn" role="tab" aria-selected="${k === doseMetric}" data-dose="${k}" type="button">${t}</button>`).join("")}
+      </div>
+      <div class="chartbox">${hrv ? ch.doseResponse(W, D) : ch.remDose(W, D)}</div></div>`;
+}
+
+// Same pooled-history read as the HRV chart, in plain REM minutes. The
 // slope is only stated once its 95% interval clears zero.
 function remHead(D) {
   const { fit } = ch.remFit(D);
@@ -2249,6 +2258,7 @@ for (const btn of document.querySelectorAll(".tab")) {
 $("trends").addEventListener("click", (e) => {
   const b = e.target.closest(".rbtn");
   if (!b || !DATA) return;
+  if (b.dataset.dose) { doseMetric = b.dataset.dose; renderDoseCard(DATA); return; }
   if (b.dataset.metric) { timingMetric = b.dataset.metric; renderTimingCard(DATA); return; }
   renderTrendCharts(DATA, Number(b.dataset.days));
 });
