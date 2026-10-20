@@ -2252,6 +2252,8 @@ for (const btn of document.querySelectorAll(".tab")) {
     scrollTo(0, 0);
     barDbg(btn.dataset.tab);
     if (btn.dataset.tab === "drinks") refreshTonight();
+    // REM is a side look; every visit to Trends starts back on HRV.
+    if (btn.dataset.tab === "trends" && doseMetric !== "hrv" && DATA) { doseMetric = "hrv"; renderDoseCard(DATA); }
   });
 }
 
