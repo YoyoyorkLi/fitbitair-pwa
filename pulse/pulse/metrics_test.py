@@ -265,6 +265,49 @@ def recovery_load_deep_lens():
 
 
 @case
+def recovery_load_catches_a_sick_night_with_no_fever():
+    """The Oct 19 2026 allergy night: no drinks, no fever, breathing rate
+    actually DOWN -- but deep HRV ~68% of normal and heart rate up all night
+    (non-REM 67 vs 62, floor 63 vs 58, settled late). All-day resting HR
+    barely moved, which is why the old marker scored it settled at 0.40."""
+    deep_h = [48, 62, 40, 55, 35, 47, 58, 42, 50, 38] * 3
+    nonrem_h = [62, 58, 66, 61, 63, 57, 64, 60, 65, 62] * 3
+    floor_h = [58, 55, 61, 57, 59, 54, 60, 56, 62, 58] * 3
+    settle_h = [96, 40, 180, 110, 70, 230, 85, 130, 60, 150] * 3
+    rr_h = [15.4, 15.0, 15.8, 15.3, 15.6, 15.1, 15.5, 15.2, 15.7, 15.4] * 3
+    sick = mx.recovery_load(36.6, [], 67, nonrem_h, 14.4, rr_h,
+                            temp_delta=-0.38, temp_sd=0.45,
+                            hrv_deep=32.75, hrv_deep_hist=deep_h,
+                            hr_floor=63, hr_floor_hist=floor_h,
+                            settle=130, settle_hist=settle_h)
+    assert mx.load_state(sick) >= 1, sick
+
+    # Same night with sleep HR normal: the HRV drop alone stays settled --
+    # one marker off is still noise.
+    hrv_only = mx.recovery_load(36.6, [], 62, nonrem_h, 14.4, rr_h,
+                                hrv_deep=32.75, hrv_deep_hist=deep_h,
+                                hr_floor=58, hr_floor_hist=floor_h,
+                                settle=96, settle_hist=settle_h)
+    assert mx.load_state(hrv_only) == 0, hrv_only
+
+    # The HR marker is the mean of its two lenses: floor up alone is half.
+    one = mx.recovery_load(60, [60] * 30, 62, nonrem_h, 15.4, rr_h, hr_floor=64, hr_floor_hist=floor_h)
+    both = mx.recovery_load(60, [60] * 30, 68, nonrem_h, 15.4, rr_h, hr_floor=64, hr_floor_hist=floor_h)
+    assert 0 < one < both, (one, both)
+
+
+@case
+def settle_minutes_finds_when_hr_reaches_its_floor():
+    t0 = pd.Timestamp("2026-10-19 01:42")
+    idx = pd.date_range(t0, periods=480, freq="60s")
+    # 75 bpm falling linearly to 55 over the first 120 min, then flat.
+    bpm = pd.Series([max(55.0, 75 - 20 * i / 120) for i in range(480)], index=idx)
+    s = mx.settle_minutes(bpm, t0, idx[-1])
+    assert 95 <= s <= 125, s                     # within 3 bpm of 55 from ~102 min
+    assert mx.settle_minutes(bpm.iloc[:30], t0, idx[29]) is None   # under an hour
+
+
+@case
 def nap_sessions_are_what_main_sleeps_rejects():
     """The naps push.py stores for the app are exactly the sessions main_sleeps()
     rejects and nap_minutes() sums -- one definition, so what the app draws is

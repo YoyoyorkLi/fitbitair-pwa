@@ -241,14 +241,39 @@ usual to recover?** Fighting a bug, clearing alcohol, recovering from a hard day
 stressed, bad sleep environment. Stored as `body_load`; the reader (`app.js`,
 `load_state()`) bands it **settled / elevated / high** at 0.5 and 1.0.
 
-### Inputs — 4 overnight markers, each vs *your own* normal
+### Inputs — 5 overnight markers, each vs *your own* normal
 
 | marker | value | baseline · spread | bad direction |
 |---|---|---|---|
 | HRV | deep-sleep RMSSD, else all-night average (see below) | trailing 30-night median · 1.4826·MAD | ↓ down |
-| resting HR | `daily_resting_heart_rate.beatsPerMinute` | trailing median · 1.4826·MAD | ↑ up |
+| sleep HR | mean of non-REM HR and the night's smoothed HR floor (`hr_nadir_bpm`) | trailing median · 1.4826·MAD, each | ↑ up |
+| settle time | minutes from sleep onset until HR settles near its floor | trailing median · 1.4826·MAD | ↑ later |
 | respiratory rate | `daily_respiratory_rate.breathsPerMinute` | trailing median · 1.4826·MAD | ↑ up |
 | skin temp | `nightlyTemperatureCelsius` | **Google's** `baselineTemperatureCelsius` · `relativeNightlyStddev30dCelsius` | ↑ up |
+
+**Why sleep HR and not resting HR (Oct 2026).** The marker used to be Google's
+all-day `daily_resting_heart_rate`. On an allergy night (Oct 19 2026: couldn't
+breathe well, no drinks, no fever) it read 69 vs a 68 baseline and Recovery Load
+said *settled* at 0.40, while heart rate during sleep was clearly up: non-REM 67
+vs 62, floor 63 vs 58. Over 74 nights, telling drinking from sober nights (the
+only labelled stress we have), all-day resting HR scored AUC 0.55 (a coin flip
+is 0.5), non-REM HR 0.80, the floor 0.70, deep HRV 0.84. Non-REM HR and the floor
+agree at r = 0.96, so the marker is their **mean**, not two separate weights.
+None of these markers is alcohol-specific: they read "the body is working
+harder overnight", whatever the cause.
+
+**Settle time** is `metrics.settle_minutes()`: the 1-minute curve smoothed over 5
+min, then the first minute within 3 bpm of the smoothed minimum. It replaces the
+raw argmin timing (see *HR nadir timing* below), which picks an arbitrary point
+on a flat trough. Still noisy (σ ≈ 2 h, AUC 0.70; the 5 min / 3 bpm settings were
+the best of 12 tried on 9 drinking nights, so that AUC is optimistic), hence the
+30-min floor and a 0.10 weight. Sober median 97 min, drinking 148, Oct 19 130.
+
+**History comes from Supabase.** The hourly sync only holds ~5 days of raw HR,
+so `push._stored_history()` reads the last 30 nights' `hr_nadir_bpm` and
+`hr_curve` back and recomputes settle time from the stored curve (no extra
+column). Non-REM HR comes from the daily HRV payload, which the sync already
+pulls for 35 days.
 
 **HRV marker.** The API returns a true RMSSD scoped to deep sleep
 (`deepSleepRootMeanSquareOfSuccessiveDifferencesMilliseconds`) alongside the
@@ -275,10 +300,11 @@ per marker m:
     σ_m = 1.4826 · MAD(hist_m)               # None with < 5 clean nights
     z_m = (value − median) / σ_m             # temp: delta / google_sd
     d_m = clip( bad-direction part of z_m , 0, 3 )
-    d_m = 0  if |value − baseline| < floor_m     # floor: hrv 3ms (deep 5), rhr 2bpm,
-                                                 #        temp 0.15°C, rr 0.5
+    d_m = 0  if |value − baseline| < floor_m     # floor: hrv 3ms (deep 5), sleep HR 2bpm,
+                                                 #        temp 0.15°C, rr 0.5, settle 30min
+d_sleepHR = mean(d_nonREM, d_floor)              # whichever of the two exist
 
-weights w = { hrv 0.35, rhr 0.25, temp 0.25, rr 0.15 }   # sum = 1
+weights w = { hrv 0.35, sleep HR 0.25, temp 0.25, settle 0.10, rr 0.05 }   # sum = 1
 body_load = Σ w_m · d_m                       # present-but-normal (d_m = 0) contributes nothing,
                                               #   same as a missing marker — a reading the watch
                                               #   didn't get is not evidence of anything
@@ -290,7 +316,11 @@ body_load = max( body_load , d_temp / 2 )     # fever override: a ~2σ skin-temp
 
 Returns `None` when no marker has ≥ 5 nights of history. Weights: HRV highest (the
 specific autonomic-stress marker), breathing lowest (wrist RR is the least
-accurate). **One marker off is noise; two or three together is real.**
+accurate, AUC 0.55; it went *down* on the allergy night). Backtest on the 42
+nights since drink logging began: the stored (old) values flagged 4 of 9
+drinking and 4 of 33 sober nights; this formula, re-run without skin temp (so it
+can only read higher once temp is in), flags 6 of 9 and 5 of 33, one of those 5
+being the allergy night itself (0.81, elevated). **One marker off is noise; two or three together is real.**
 
 ### It doesn't tell you *why*
 
@@ -317,9 +347,10 @@ settle."
 computed and stored, **but nothing reads them yet.** The first backfill showed
 the smoothed *global* minimum's timing has a ~83 min personal σ and a ~120 min
 mean night-to-night swing on real data — the `argmin` of a near-flat overnight
-trough is dominated by noise. It was pulled from Recovery Load. A proper
-settling-time detector (first sustained minimum, or the low-HR period's
-centroid) is the follow-up; the column is kept for it.
+trough is dominated by noise. It was pulled from Recovery Load. The
+settling-time detector it was waiting for is now `settle_minutes()` (first minute
+the 5-min-smoothed HR is within 3 bpm of the floor), which Recovery Load uses —
+see *Recovery Load*. The argmin column stays for the hypnogram dot.
 
 ---
 
@@ -451,7 +482,7 @@ increased sympathetic drive
 ([Pietilä et al., JMIR 2018](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5878366/);
 [evening-alcohol dose–response, SLEEP 2021](https://academic.oup.com/sleep/article/44/1/zsaa135/5871424)).
 The direction is sound; the raw-`argmin` implementation is not (first-backfill σ
-≈ 83 min), so it is stored but unused pending a real settling-time detector.
+≈ 83 min), so it is stored but unused; Recovery Load uses `settle_minutes()` instead.
 
 **Overnight SpO₂** — the oxygen-desaturation index correlates strongly with the
 apnea–hypopnea index (r ≈ 0.73–0.94), and inter-night SpO₂ variability rises as

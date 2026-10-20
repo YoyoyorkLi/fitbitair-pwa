@@ -61,7 +61,9 @@ function loadMarkers(t) {
     b.push(`deep-sleep HRV ${Math.round(t.hrvDeepPct)}% of normal`);
   else if (ok(t.hrv) && ok(t.hrvBaseline) && t.hrv < t.hrvBaseline * 0.92)
     b.push(`HRV ${Math.round((t.hrv / t.hrvBaseline) * 100)}% of normal`);
-  if (ok(t.rhrDelta) && t.rhrDelta >= 2) b.push(`resting HR +${Math.round(t.rhrDelta)}`);
+  // Heart rate while asleep, not the all-day resting HR -- what the HR marker
+  // reads since the allergy night it missed (METRICS.md, Recovery Load).
+  if (ok(t.nonRemHrDelta) && t.nonRemHrDelta >= 2) b.push(`sleep HR +${Math.round(t.nonRemHrDelta)}`);
   if (ok(t.respRateDelta) && t.respRateDelta >= 0.5) b.push(`breathing +${t.respRateDelta.toFixed(1)}`);
   return b;
 }
@@ -622,7 +624,7 @@ function normalize(D) {
   for (const k of ["inBed", "need", "hrvBaseline", "bodyLoad", "loadState",
                    "skinTempDelta", "respRate", "respRateDelta", "rhrDelta",
                    "hrvDeep", "hrvDeepBaseline", "hrvDeepPct", "nonRemHr",
-                   "spo2Min"]) D[k] ??= [];
+                   "nonRemHrDelta", "spo2Min"]) D[k] ??= [];
   // Not indexed by D.dates -- a flat list of the current drinking-night's
   // drinks, so it is not touched by trimInProgressNight below.
   D.tonight ??= [];
@@ -664,7 +666,7 @@ function trimInProgressNight(D) {
                    "inBed", "need", "hrvBaseline", "debt", "score", "recovery", "strain",
                    "steps", "drinks", "target", "curves", "hypnos",
                    "bodyLoad", "loadState", "skinTempDelta", "respRate", "respRateDelta", "rhrDelta",
-                   "hrvDeep", "hrvDeepBaseline", "hrvDeepPct", "nonRemHr", "spo2Min",
+                   "hrvDeep", "hrvDeepBaseline", "hrvDeepPct", "nonRemHr", "nonRemHrDelta", "spo2Min",
                    "workouts", "naps", "drinkTimes", "drinkRows",
                    "nightRows", "nightTimes", "nightFirst", "nightLast"]) {
     if (Array.isArray(D[k])) D[k].pop();
@@ -731,7 +733,7 @@ async function loadLive() {
     // (parked as too noisy -- see METRICS.md); the PWA reads only these.
     hrvDeep: num("hrv_deep_rmssd"), hrvDeepBaseline: num("hrv_deep_baseline"),
     hrvDeepPct: num("hrv_deep_pct_baseline"),
-    nonRemHr: num("non_rem_hr"),
+    nonRemHr: num("non_rem_hr"), nonRemHrDelta: num("non_rem_hr_delta"),
     spo2Min: num("spo2_min"),
     hrmax: Number(last.hrmax) || 192,
     // Per night, not just the newest one: hr_curve and stages are columns on
@@ -875,7 +877,7 @@ function dayView(D, i) {
     bodyLoad: at(D.bodyLoad),
     loadState: Array.isArray(D.loadState) && Number.isInteger(D.loadState[i]) ? D.loadState[i] : NaN,
     skinTempDelta: at(D.skinTempDelta), respRateDelta: at(D.respRateDelta), rhrDelta: at(D.rhrDelta),
-    hrvDeepPct: at(D.hrvDeepPct),
+    hrvDeepPct: at(D.hrvDeepPct), nonRemHrDelta: at(D.nonRemHrDelta),
   };
 }
 // The newest night keeps whatever richer object the source handed us (demo.json
@@ -1770,7 +1772,7 @@ function renderDetailBody(kind) {
       ? `<div class="card loadcard l${t.loadState}">
           <h2>Recovery load — ${LOAD_WORD[t.loadState]}</h2>
           <p class="note" style="margin:0">${t.loadState === 0
-            ? "Your overnight heart rate, HRV, breathing and skin temperature all sat within their normal range."
+            ? "Your sleeping heart rate, how fast it settled, HRV, breathing and skin temperature all sat within their normal range."
             : `${bits.length ? bits.join(" · ") : "One or more overnight signals ran outside your 30-night normal"}. ${
                 t.drinks ? `The expected hit from ${t.drinks} drink${t.drinks > 1 ? "s" : ""}.`
                          : "Illness, stress, a late meal, or a missed tap?"} It also caps today's strain ceiling.`}</p></div>`

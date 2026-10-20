@@ -826,22 +826,60 @@ def _mad_sigma(vals):
 # Recovery Load weights and per-marker "min move to count" floors. HRV weighs
 # most (the specific autonomic-stress marker), breathing least (wrist RR is the
 # least accurate of the four). See METRICS.md.
-_RL_W = {"hrv": 0.35, "rhr": 0.25, "temp": 0.25, "rr": 0.15}
-_RL_FLOOR = {"hrv": 3.0, "hrv_deep": 5.0, "rhr": 2.0, "temp": 0.15, "rr": 0.5}
+_RL_W = {"hrv": 0.35, "hr": 0.25, "temp": 0.25, "settle": 0.10, "rr": 0.05}
+_RL_FLOOR = {"hrv": 3.0, "hrv_deep": 5.0, "hr": 2.0, "temp": 0.15, "rr": 0.5, "settle": 30.0}
+
+SETTLE_SMOOTH_MIN = 5       # rolling window over the 1-minute curve -- same as _nadir
+SETTLE_BAND_BPM = 3         # "settled" = within this many bpm of the night's floor
 
 
-def recovery_load(hrv, hrv_hist, rhr, rhr_hist, rr, rr_hist,
+def settle_minutes(bpm, start, end):
+    """Minutes from sleep onset until heart rate settles near the night's floor.
+
+    `bpm` is a 1-minute series (DatetimeIndex, naive local -- the same buckets
+    push._curve stores). Smoothed over SETTLE_SMOOTH_MIN minutes, then the
+    first minute within SETTLE_BAND_BPM of the smoothed minimum. Unlike the
+    argmin of the floor (hr_nadir_at), which lands anywhere along a flat
+    overnight trough, this asks when the trough was first reached. None with
+    under an hour of samples.
+    """
+    if bpm is None or pd.isna(start) or pd.isna(end):
+        return None
+    w = bpm[(bpm.index >= start) & (bpm.index <= end)].dropna()
+    if len(w) < 60:
+        return None
+    sm = w.rolling(SETTLE_SMOOTH_MIN, center=True,
+                   min_periods=max(1, SETTLE_SMOOTH_MIN // 3)).mean().dropna()
+    if sm.empty:
+        return None
+    t = sm[sm <= sm.min() + SETTLE_BAND_BPM].index[0]
+    return float((t - start).total_seconds() / 60)
+
+
+def recovery_load(hrv, hrv_hist, sleep_hr, sleep_hr_hist, rr, rr_hist,
                   temp_delta=None, temp_sd=None,
-                  hrv_deep=None, hrv_deep_hist=None):
+                  hrv_deep=None, hrv_deep_hist=None,
+                  hr_floor=None, hr_floor_hist=None,
+                  settle=None, settle_hist=None):
     """One overnight number: is your body working harder than usual to recover?
 
-    Each of the 4 autonomic markers vs YOUR OWN 30-night normal, counting only
-    moves in the bad direction (HRV down, RHR/RR/skin-temp up), floored so a
+    Each of the 5 overnight markers vs YOUR OWN 30-night normal, counting only
+    moves in the bad direction (HRV down; sleep HR, settle time, RR and skin
+    temp up), floored so a
     tiny wobble is nothing and clamped to 3 so one wild night can't pin it.
     Weighted mean over the markers that have data; then max() with the skin-temp
     deviation / 2, so a ~2-sigma temperature rise (fever) reaches the top band
     on its own -- no other marker gets that, a lone HRV or breathing wobble is
     just noise.
+
+    HR marker: heart rate WHILE ASLEEP, not Google's all-day resting HR (which
+    barely moved on drinking or sick nights: AUC 0.55 vs 0.80 for non-REM HR on
+    74 nights). The mean of two lenses that agree at r = 0.96 -- non-REM HR
+    (`sleep_hr`) and the night's smoothed floor (`hr_floor`) -- so one noisy
+    reading can't carry it. Either alone is used when the other is missing.
+
+    Settle marker: settle_minutes(), how long after onset HR reached its floor.
+    Noisy (sigma ~2 h), so a 30 min floor and a small weight.
 
     HRV marker: the deep-sleep RMSSD (`hrv_deep`, measured in a controlled
     state -- probed as the sharper alcohol signal, ~-44% vs the average's -23%
@@ -873,7 +911,11 @@ def recovery_load(hrv, hrv_hist, rhr, rhr_hist, rr, rr_hist,
     dh = bad(hrv_deep, hrv_deep_hist or [], _RL_FLOOR["hrv_deep"], invert=True)
     if dh is None:                          # no deep-RMSSD baseline yet
         dh = bad(hrv, hrv_hist, _RL_FLOOR["hrv"], invert=True)
-    dr = bad(rhr, rhr_hist, _RL_FLOOR["rhr"])
+    hr_parts = [v for v in (bad(sleep_hr, sleep_hr_hist or [], _RL_FLOOR["hr"]),
+                            bad(hr_floor, hr_floor_hist or [], _RL_FLOOR["hr"]))
+                if v is not None]
+    dr = sum(hr_parts) / len(hr_parts) if hr_parts else None
+    ds = bad(settle, settle_hist or [], _RL_FLOOR["settle"])
     drr = bad(rr, rr_hist, _RL_FLOOR["rr"])
     if _isnum(temp_delta) and _isnum(temp_sd) and temp_sd > 1e-9:
         dt = 0.0 if abs(temp_delta) < _RL_FLOOR["temp"] \
@@ -881,7 +923,7 @@ def recovery_load(hrv, hrv_hist, rhr, rhr_hist, rr, rr_hist,
     else:
         dt = None
 
-    for k, v in (("hrv", dh), ("rhr", dr), ("temp", dt), ("rr", drr)):
+    for k, v in (("hrv", dh), ("hr", dr), ("temp", dt), ("settle", ds), ("rr", drr)):
         if v is not None:
             d[k] = v
     if not d:

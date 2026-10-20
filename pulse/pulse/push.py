@@ -338,26 +338,58 @@ def _spo2_bounds(con):
     return out
 
 
-def _stored_nadir_minutes(since):
-    """{night -> minutes from sleep onset to HR nadir} for nights already in
-    Supabase, from `since` on. {} without credentials (local/demo runs) or if
-    the read fails -- this only feeds a display baseline, never worth a
-    failed sync."""
+def _curve_series(curve, day):
+    """A stored hr_curve ([["HH:MM", bpm], ...] for civil day `day`) back to a
+    1-minute bpm Series on naive local time."""
+    day = pd.Timestamp(day).normalize()
+    return pd.Series({day + pd.Timedelta(minutes=int(t[:2]) * 60 + int(t[3:5])): b
+                      for t, b in (curve or []) if b is not None}, dtype=float)
+
+
+def _stored_history(since):
+    """Overnight-HR series for nights already in Supabase, from `since` on:
+    (minutes to nadir, nadir bpm, settle minutes), each {night -> value}.
+
+    The hourly sync only holds ~5 days of raw heart-rate, so these baselines
+    can't be rebuilt locally. Settle time is recomputed from the stored
+    1-minute hr_curve -- the same buckets settle_minutes() sees on a fresh
+    night -- joined with the previous day's curve for a sleep that began
+    before midnight. Empty dicts without credentials (local/demo runs) or if
+    the read fails: these only feed baselines, never worth a failed sync."""
+    empty = ({}, {}, {})
     _load_local_env()
     url = (os.getenv("SUPABASE_URL") or "").rstrip("/").removesuffix("/rest/v1")
     key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
     if not url or not key:
-        return {}
-    path = ("/rest/v1/nights?select=night,sleep_start,hr_nadir_at"
-            f"&night=gte.{since:%Y-%m-%d}&sleep_start=not.is.null&hr_nadir_at=not.is.null")
+        return empty
+    path = ("/rest/v1/nights?select=night,sleep_start,sleep_end,hr_nadir_at,hr_nadir_bpm,hr_curve"
+            f"&night=gte.{since - pd.Timedelta(days=1):%Y-%m-%d}&order=night")
     try:
         rows = _request(url, key, path, method="GET") or []
     except RuntimeError as e:
-        print(f"warning: could not read stored nadir history: {e}")
-        return {}
-    return {pd.Timestamp(r["night"]):
-            (pd.Timestamp(r["hr_nadir_at"]) - pd.Timestamp(r["sleep_start"])).total_seconds() / 60
-            for r in rows}
+        print(f"warning: could not read stored overnight-HR history: {e}")
+        return empty
+    curves = {pd.Timestamp(r["night"]): _curve_series(r["hr_curve"], r["night"])
+              for r in rows if r.get("hr_curve")}
+    mins, floor, settle = {}, {}, {}
+    for r in rows:
+        night = pd.Timestamp(r["night"])
+        if night < since or not r.get("sleep_start"):
+            continue
+        if r.get("hr_nadir_at"):
+            mins[night] = (pd.Timestamp(r["hr_nadir_at"])
+                           - pd.Timestamp(r["sleep_start"])).total_seconds() / 60
+        if r.get("hr_nadir_bpm") is not None:
+            floor[night] = float(r["hr_nadir_bpm"])
+        if r.get("sleep_end"):
+            parts = [c for c in (curves.get(night - pd.Timedelta(days=1)), curves.get(night))
+                     if c is not None and not c.empty]
+            if parts:
+                v = mx.settle_minutes(pd.concat(parts).sort_index(),
+                                      mx.to_local(r["sleep_start"]), mx.to_local(r["sleep_end"]))
+                if v is not None:
+                    settle[night] = v
+    return mins, floor, settle
 
 
 def build_rows(con=None):
@@ -422,6 +454,7 @@ def build_rows(con=None):
     # right (it's Oura's Recovery Index input), but this needs a proper
     # settling-time detector, not a raw argmin, before it can carry weight.
     nadir = {}                          # night -> (bpm|None, at_ts|None, min_to|None)
+    settle_series = {}                  # night -> minutes until HR settled near its floor
     for _, r in m.iterrows():
         night = pd.Timestamp(r["date"])
         start, end = r.get("start"), r.get("end")
@@ -430,14 +463,23 @@ def build_rows(con=None):
         if na is not None and not pd.isna(start):
             mtn = float((pd.Timestamp(na) - pd.Timestamp(start)).total_seconds() / 60)
         nadir[night] = (nb, na, mtn)
+        if hr is not None and not hr.empty and not pd.isna(start) and not pd.isna(end):
+            w = hr[(hr["ts"] >= start) & (hr["ts"] <= end)]
+            v = mx.settle_minutes(w.set_index("ts")["bpm"].resample("60s").mean(), start, end) \
+                if not w.empty else None
+            if v is not None:
+                settle_series[night] = v
     nadir_min_series = {k: v[2] for k, v in nadir.items() if v[2] is not None}
+    floor_series = {k: float(v[0]) for k, v in nadir.items() if v[0] is not None}
     # The hourly sync only holds ~5 days of heart-rate, so the local series
     # alone gave a "baseline" of 3 nights. Fill the rest of the window from
     # what earlier runs already stored; local values win where both exist.
     if nadir:
         since = min(nadir) - pd.Timedelta(days=cfg.BASELINE_DAYS)
-        for k, v in _stored_nadir_minutes(since).items():
-            nadir_min_series.setdefault(k, v)
+        for local, stored in zip((nadir_min_series, floor_series, settle_series),
+                                 _stored_history(since)):
+            for k, v in stored.items():
+                local.setdefault(k, v)
 
     rows = []
     for _, r in m.iterrows():
@@ -450,12 +492,14 @@ def build_rows(con=None):
         sb = spo2_bnd.get(night)                        # (lower_pct, sd_pct) | None
         body_load = mx.recovery_load(
             hrv_map.get(night), _hist(hrv_map, night),
-            rhr_map.get(night), _hist(rhr_map, night),
+            non_rem_hr.get(night), _hist(non_rem_hr, night),
             rr.get(night), _hist(rr, night),
             (st[0] - st[1]) if st else None,
             st[2] if st else None,
             hrv_deep=deep_rmssd.get(night),
-            hrv_deep_hist=_hist(deep_rmssd, night))
+            hrv_deep_hist=_hist(deep_rmssd, night),
+            hr_floor=floor_series.get(night), hr_floor_hist=_hist(floor_series, night),
+            settle=settle_series.get(night), settle_hist=_hist(settle_series, night))
 
         rows.append({
             "night": night.strftime("%Y-%m-%d"),
