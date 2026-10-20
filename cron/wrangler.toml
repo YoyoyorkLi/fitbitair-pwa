@@ -1,0 +1,19 @@
+# Pulse sync pinger -- a Cloudflare Worker whose only job is a cron trigger.
+#
+# GitHub's own schedule (.github/workflows/sync.yml) is best-effort on a quiet
+# repo: the last 100 scheduled runs landed a median 4.6 h apart. Cloudflare's
+# cron triggers fire on time, so this hits /api/sync every 30 min with
+# SYNC_KEY and the Vercel endpoint dispatches the same workflow. The GitHub
+# token never leaves Vercel.
+#
+# Deploy (once):  cd cron && npx wrangler deploy
+# Secret (once):  npx wrangler secret put SYNC_KEY   -- same value as Vercel's
+name = "pulse-sync-cron"
+main = "index.js"
+compatibility_date = "2025-03-10"
+
+[triggers]
+crons = ["*/30 * * * *"]
+
+[vars]
+SYNC_URL = "https://fitbitair-pwa.vercel.app/api/sync"

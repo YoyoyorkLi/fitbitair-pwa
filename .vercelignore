@@ -12,6 +12,9 @@
 # README and .github/workflows/sync.yml own this half of the project.
 pulse/
 
+# The Cloudflare cron pinger (cron/): deployed with wrangler, never by Vercel.
+cron/
+
 # Local tooling and generated artifacts.
 .claude/
 preview.html
