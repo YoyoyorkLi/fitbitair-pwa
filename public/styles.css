@@ -46,15 +46,11 @@ a{color:var(--accent)}
    ("Sick tonight") and Drinks ("Log drink now"). A little more for all three. */
 #trends{padding-top:calc(var(--top-gap) + 12px)}
 /* Workouts and Drinks open on their calendar, with a little more air than
-   Trends. Each page is at least as tall as the space down to the tab bar, so
-   .midzone (the one action button) can sit centred between the calendar and
-   the bar. When tonight's list fills that space, the button just follows the
-   calendar. [hidden] still wins over the display:flex here. */
-#workouts,#drinks{padding-top:calc(var(--top-gap) + 30px);display:flex;flex-direction:column;
-  min-height:calc(100dvh - max(22px, env(safe-area-inset-top)) - var(--tabbar-h) - env(safe-area-inset-bottom))}
-.midzone{flex:1;display:flex;flex-direction:column;justify-content:center;padding:18px 0}
+   Trends, and the page's one action button (.midzone) sits 20px under it. */
+#workouts,#drinks{padding-top:calc(var(--top-gap) + 30px)}
+.midzone{margin-top:20px}
 .midzone .lognow,.midzone .sicknow{margin:0}
-.aftercal{margin-top:4px}
+.aftercal{margin-top:22px}
 
 /* Night selector. Meets Apple's 44px touch-target advice. Arrow keys and the
    swipe gesture are the other two ways in. */
