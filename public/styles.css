@@ -41,9 +41,10 @@ a{color:var(--accent)}
    come from the hidden header's own margin, which was an accident and read as the
    pages starting lower than Day's header. */
 #workouts,#drinks,#trends{padding-top:var(--top-gap)}
-/* Trends opens on a chart card, not a calendar or a button, and at the shared gap
-   it read as crowding the status bar. A little more, for that page only. */
-#trends{padding-top:calc(var(--top-gap) + 12px)}
+/* At the shared gap the first thing on these pages crowds the status bar --
+   Trends' chart card, and now the full-width buttons that open Workouts
+   ("Sick tonight") and Drinks ("Log drink now"). A little more for all three. */
+#workouts,#drinks,#trends{padding-top:calc(var(--top-gap) + 12px)}
 
 /* Night selector. Meets Apple's 44px touch-target advice. Arrow keys and the
    swipe gesture are the other two ways in. */
