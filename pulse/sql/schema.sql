@@ -96,6 +96,17 @@ create index drinks_night_idx  on public.drinks (night desc);
 create index drinks_logged_idx on public.drinks (logged_at desc);
 
 
+-- -------------------------------------------------------------- sick_nights
+-- Evenings tagged "Sick tonight" in the app (migration 004). night = the
+-- evening, 4am rule, same as drinks.night; the morning it affects is night + 1.
+-- push.py leaves these mornings (and drinking mornings) out of the 30-night
+-- normal that Recovery Load compares against.
+create table public.sick_nights (
+  night       date         primary key,
+  created_at  timestamptz  not null default now()
+);
+
+
 -- ------------------------------------------------------------------- nights
 -- One row per night, written by the hourly sync (pulse/push.py). This is
 -- metrics.py output flattened for reading -- the PWA does no math, and every
@@ -403,6 +414,7 @@ full outer join (
 alter table public.drinks     enable row level security;
 alter table public.nights     enable row level security;
 alter table public.sync_state enable row level security;
+alter table public.sick_nights enable row level security;
 
 create policy "read drinks"   on public.drinks     for select to authenticated using (true);
 create policy "read nights"   on public.nights     for select to authenticated using (true);
@@ -414,6 +426,9 @@ create policy "read sync"     on public.sync_state for select to authenticated u
 create policy "add drinks"    on public.drinks for insert to authenticated with check (true);
 create policy "edit drinks"   on public.drinks for update to authenticated using (true) with check (true);
 create policy "delete drinks" on public.drinks for delete to authenticated using (true);
+create policy "read sick"     on public.sick_nights for select to authenticated using (true);
+create policy "add sick"      on public.sick_nights for insert to authenticated with check (true);
+create policy "delete sick"   on public.sick_nights for delete to authenticated using (true);
 
 -- Deliberately no policy for `anon`, and none for writing nights/sync_state.
 -- The tap endpoint and the sync both use the service_role key server-side,
@@ -432,8 +447,9 @@ create policy "delete drinks" on public.drinks for delete to authenticated using
 --   2. Revoking anon is a second lock. RLS is the real one -- but if it ever
 --      gets switched off during debugging and left off, the grant layer still
 --      returns "permission denied" instead of your drinking history.
-revoke all on public.drinks, public.nights, public.sync_state, public.night_summary from anon;
+revoke all on public.drinks, public.nights, public.sync_state, public.night_summary, public.sick_nights from anon;
 
 grant usage  on schema public to authenticated;
 grant select, insert, update, delete on public.drinks to authenticated;
+grant select, insert, delete on public.sick_nights to authenticated;
 grant select on public.nights, public.sync_state, public.night_summary to authenticated;

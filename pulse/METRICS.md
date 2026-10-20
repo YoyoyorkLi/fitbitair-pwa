@@ -239,7 +239,7 @@ only drift.
 `recovery_load(...)` — one overnight number: **is your body working harder than
 usual to recover?** Fighting a bug, clearing alcohol, recovering from a hard day,
 stressed, bad sleep environment. Stored as `body_load`; the reader (`app.js`,
-`load_state()`) bands it **settled / elevated / high** at 0.5 and 1.0.
+`load_state()`) bands it **settled / elevated / high** at 0.6 and 1.0.
 
 ### Inputs — 5 overnight markers, each vs *your own* normal
 
@@ -268,6 +268,27 @@ raw argmin timing (see *HR nadir timing* below), which picks an arbitrary point
 on a flat trough. Still noisy (σ ≈ 2 h, AUC 0.70; the 5 min / 3 bpm settings were
 the best of 12 tried on 9 drinking nights, so that AUC is optimistic), hence the
 30-min floor and a 0.10 weight. Sober median 97 min, drinking 148, Oct 19 130.
+
+**"Normal" leaves out drinking and sick nights (Oct 2026).** Every marker's
+30-night median and spread skip the morning after an evening with a logged drink
+or a "Sick tonight" tag (`push._off_mornings`, table `sick_nights`, migration
+004). The stored `hrv_deep_baseline`, `non_rem_hr_baseline` and
+`resp_rate_baseline` the app shows next to each marker use the same rule;
+`hrv_baseline` (Recovery score, HRV dose chart) does not. Backtest, 43 nights
+since drink logging began:
+
+| normal built from | Oct 19 allergy night | drinking flagged | sober flagged | AUC |
+|---|---|---|---|---|
+| all nights, cutoff 0.5 (before) | 0.81 | 6 of 9 | 6 of 34 | 0.79 |
+| no drinking nights, cutoff 0.5 | 1.12 | 7 of 9 | 10 of 34 | 0.83 |
+| **no drinking nights, cutoff 0.6** | **1.12** | **7 of 9** | **7 of 34** | 0.83 |
+| no drinking or flagged nights | 1.99 | 9 of 9 | 20 of 34 | 0.85 |
+
+Flagged nights are NOT dropped: each drop raises "normal", which flags more,
+and it ran away to 20 of 34 sober nights. The cleaner normal reads every night
+a little higher, so the elevated band moved from 0.5 to 0.6 (0.6 was picked on
+this same data, so it is optimistic). 38 of 43 nights kept their band; the 5
+that moved all moved up (Oct 3 18 drinks and the Oct 18 allergy night to high).
 
 **History comes from Supabase.** The hourly sync only holds ~5 days of raw HR,
 so `push._stored_history()` reads the last 30 nights' `hr_nadir_bpm` and

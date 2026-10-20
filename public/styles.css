@@ -310,6 +310,13 @@ a{color:var(--accent)}
   letter-spacing:-.01em;-webkit-tap-highlight-color:transparent}
 .lognow:active{filter:brightness(.92)}
 .lognow .plus{font-size:17px;font-weight:500;line-height:1;margin-top:-1px}
+/* "Sick tonight" (Workouts tab): a quiet outline either way. Tagged just
+   brightens it -- no fill, no red. */
+.sicknow{display:block;width:100%;appearance:none;-webkit-appearance:none;
+  background:none;color:var(--muted);border:1px solid var(--grid);border-radius:6px;
+  padding:10px 16px;margin:0 0 16px;font:inherit;font-weight:600;font-size:14px;
+  -webkit-tap-highlight-color:transparent}
+.sicknow.on{color:var(--text);border-color:var(--muted);background:var(--panel)}
 .nowlist{margin:0 0 22px}
 .nowhd{margin:0 0 8px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 .nowhd b{color:var(--text)}
@@ -445,6 +452,8 @@ a{color:var(--accent)}
   font-style:normal;font-size:9px;font-weight:700;line-height:13px;text-align:center;color:var(--bg)}
 .pds .dr{background:var(--drink)}
 .pds .wo{background:var(--strain)}
+/* A sick evening: a plain red dot, no count, next to the drink/workout badges. */
+.pds .sk{min-width:0;width:13px;padding:0;border-radius:50%;background:var(--warn)}
 /* margin-bottom is the fix here, not margin-top: .note is 0-bottom by
    default (the usual case is a caption sitting flush above the next .card's
    own top margin), which on this page meant the caption text touched the

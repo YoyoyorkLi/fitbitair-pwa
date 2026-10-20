@@ -26,12 +26,12 @@ const show = (id) => {
 };
 const { hm, ok, col, ZONE } = ch;
 
-// Recovery Load: 0/1/2 = settled / elevated / high (bands 0.5, 1.0 -- mirror
+// Recovery Load: 0/1/2 = settled / elevated / high (bands 0.6, 1.0 -- mirror
 // metrics.load_state). The strain ceiling mirrors metrics.strain_ceiling +
 // STRAIN_CEILING_LOAD_CAP: an elevated/high load hard-caps it because the
 // recovery score can't see skin temp or breathing.
 const LOAD_WORD = ["settled", "elevated", "high"];
-const loadStateOf = (v) => (!ok(v) ? NaN : v < 0.5 ? 0 : v < 1.0 ? 1 : 2);
+const loadStateOf = (v) => (!ok(v) ? NaN : v < 0.6 ? 0 : v < 1.0 ? 1 : 2);
 const ceilingWithLoad = (rec, st) => {
   const c = 6 + 0.09 * rec;
   return st === 2 ? Math.min(c, 8) : st === 1 ? Math.min(c, 11) : c;
@@ -80,6 +80,7 @@ function loadBar(t) {
   const off = loadRows(t).filter((r) => r[4]).map((r) => r[0]);
   const sub = [
     s > 0 && off.length ? `${off.slice(0, 3).join(", ")}${off.length > 3 ? ` +${off.length - 3}` : ""}` : "",
+    t.sick ? "sick" : "",
     t.drinks ? `${t.drinks} drink${t.drinks > 1 ? "s" : ""}` : "",
   ].filter(Boolean).join(" · ");
   return `<button type="button" class="loadbar l${s}" data-detail="recovery">
@@ -629,6 +630,8 @@ function normalize(D) {
   // Not indexed by D.dates -- a flat list of the current drinking-night's
   // drinks, so it is not touched by trimInProgressNight below.
   D.tonight ??= [];
+  // Evenings tagged "Sick tonight" (drinks.night convention). The demo has none.
+  D.sickNights ??= new Set();
   // Derive loadState from bodyLoad if a fixture carried only the raw score.
   if (Array.isArray(D.bodyLoad) && (!Array.isArray(D.loadState) || !D.loadState.length)) {
     D.loadState = D.bodyLoad.map(loadStateOf);
@@ -709,7 +712,7 @@ async function loadLive() {
     data.map((r) => (Array.isArray(r.zone_min) ? Number(r.zone_min[i]) || 0 : 0)));
 
   // Recovery Load: an overnight anomaly flag (metrics.recovery_load, stored).
-  // 0/1/2 = settled / elevated / high; bands are 0.5 and 1.0. loadState and the
+  // 0/1/2 = settled / elevated / high; bands are 0.6 and 1.0. loadState and the
   // strain ceiling derived from it are (re)computed in normalize().
   const rec = num("recovery");
   const bodyLoad = num("body_load");
@@ -802,6 +805,16 @@ async function loadLive() {
     D.loggingSince = first?.[0] ? new Date(first[0].logged_at) : null;
   }
 
+  // "Sick tonight" tags. A missing table (migration 004 not run yet) is the
+  // same as none.
+  {
+    const from = new Date(`${D.dates[0]}T12:00:00Z`);
+    from.setUTCDate(from.getUTCDate() - 2);
+    const { data: sick } = await sb.from("sick_nights").select("night")
+      .gte("night", from.toISOString().slice(0, 10));
+    D.sickNights = new Set((sick || []).map((r) => r.night));
+  }
+
   // The dead man's check the schema was built around and nothing ever read.
   // push() writes this on every run, success or failure; Supabase sleeps a
   // project after 7 days idle and GitHub disables a cron workflow after ~60,
@@ -853,10 +866,20 @@ function hypnoFrom(row) {
 // row only, and called `D.today`; now it is a function of the index the stepper
 // is on. Every field comes out of an array that was already loaded, which is
 // why stepping never touches the network.
+// A nights row is dated by its morning; drinks and sick tags by the evening.
+const eveningBefore = (iso) => { const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); };
+
 // The HR floor's normal: median of the 30 nights before, same window as
-// push._baseline. NaN under 3 nights.
+// push._baseline, skipping mornings after drinks or a sick tag (push._off_mornings).
+// NaN under 3 nights.
 function floorNorm(D, i) {
-  const v = (D.hypnos || []).slice(Math.max(0, i - 30), i).map((h) => h?.nadirBpm).filter(ok).sort((a, b) => a - b);
+  const v = [];
+  for (let j = Math.max(0, i - 30); j < i; j++) {
+    if (D.drinks[j] > 0 || D.sickNights?.has(eveningBefore(D.dates[j]))) continue;
+    const b = D.hypnos?.[j]?.nadirBpm;
+    if (ok(b)) v.push(b);
+  }
+  v.sort((a, b) => a - b);
   if (v.length < 3) return NaN;
   const m = v.length >> 1;
   return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
@@ -891,6 +914,7 @@ function dayView(D, i) {
     hrvDeep: at(D.hrvDeep), hrvDeepBaseline: at(D.hrvDeepBaseline),
     nonRemHr: at(D.nonRemHr), respRate: at(D.respRate),
     floor: D.hypnos?.[i]?.nadirBpm ?? NaN, floorNorm: floorNorm(D, i),
+    sick: !!D.sickNights?.has(eveningBefore(D.dates[i])),
   };
 }
 // The newest night keeps whatever richer object the source handed us (demo.json
@@ -1483,6 +1507,27 @@ async function addDrinkNow() {
   render();
 }
 
+// "Sick tonight": one row per evening in sick_nights, same 4am night as a
+// drink. Tap again to untag. Recovery Load leaves these mornings out of its
+// normal, and the load bar / card say "sick".
+// Tonight's evening key. The demo's nights are a fixed September, so there
+// "tonight" is its newest night -- otherwise a tag would land on a date the
+// calendar never shows.
+const sickKey = (D) => (isDemo ? D.dates[D.dates.length - 1] : drinkNightOf(new Date(), clockTz()));
+
+async function toggleSickTonight() {
+  const D = DATA, night = sickKey(D);
+  const on = D.sickNights.has(night);
+  if (!isDemo) {
+    const { error } = on
+      ? await sb.from("sick_nights").delete().eq("night", night)
+      : await sb.from("sick_nights").insert({ night });
+    if (error) return alert(`Could not ${on ? "untag" : "tag"} tonight: ${error.message}`);
+  }
+  if (on) D.sickNights.delete(night); else D.sickNights.add(night);
+  render();
+}
+
 async function deleteDrinkById(id) {
   const D = DATA;
   if (isDemo || String(id).startsWith("demo-")) {
@@ -1558,6 +1603,7 @@ $("dash").addEventListener("click", (e) => {
   if (e.target.closest?.("#cal-prev")) return stepCalMonth(-1);
   if (e.target.closest?.("#cal-next")) return stepCalMonth(1);
   if (e.target.closest?.("[data-log-now]")) return addDrinkNow();
+  if (e.target.closest?.("[data-sick-toggle]")) return toggleSickTonight();
   const delNow = e.target.closest?.("[data-del-now]");
   if (delNow) return deleteDrinkById(delNow.dataset.delNow);
   const drCell = e.target.closest?.(".calcell[data-drinks-day-idx]");
@@ -1791,7 +1837,7 @@ function renderDetailBody(kind) {
               `<div class="lrow${off ? " off" : ""}"><span>${name}</span><span>${v}</span><span>${norm}</span></div>`).join("")}
           </div>` : ""}
           ${(() => {
-            const foot = [t.drinks ? `${t.drinks} drink${t.drinks > 1 ? "s" : ""}` : "", ok(cap) ? `Strain capped at ${cap}` : ""].filter(Boolean);
+            const foot = [t.sick ? "Sick" : "", t.drinks ? `${t.drinks} drink${t.drinks > 1 ? "s" : ""}` : "", ok(cap) ? `Strain capped at ${cap}` : ""].filter(Boolean);
             return foot.length ? `<p class="lfoot">${foot.join(" · ")}</p>` : "";
           })()}</div>`
       : "";
@@ -1897,7 +1943,13 @@ function renderWorkoutsTab(D) {
       : `<div class="calcell${idx == null ? " out" : ""}">${day}</div>`;
   }
 
+  // "Sick tonight" lives here, not on Drinks: it is about the body, not a
+  // drink, and it should not sit next to the drink button's urgency.
+  const sickTonight = !!D.sickNights?.has(sickKey(D));
   $("workouts").innerHTML = `
+    <button type="button" class="sicknow${sickTonight ? " on" : ""}" data-sick-toggle aria-pressed="${sickTonight}">
+      ${sickTonight ? "Sick tonight · logged" : "Sick tonight"}
+    </button>
     <div class="calnav">
       <button class="nav" id="cal-prev" type="button" aria-label="Previous month">‹</button>
       <p class="calmonth">${monthLabel}</p>
@@ -2333,9 +2385,10 @@ function renderDayPicker() {
     if (idx == null) { cells += `<div class="calcell out">${day}</div>`; continue; }
     const dr = D.nightRows[idx]?.length || 0, wo = D.workouts[idx]?.length || 0;
     const label = new Date(pickYear, pickMonth, day).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+    const sick = !!D.sickNights?.has(D.dates[idx]);
     cells += `<button type="button" class="calcell pick${idx === dayIdx ? " sel" : ""}" data-pick-idx="${idx}"
-      aria-label="${label}"${idx === dayIdx ? ` aria-current="true"` : ""}>${day}${dr || wo
-        ? `<span class="pds">${dr ? `<i class="dr">${dr}</i>` : ""}${wo ? `<i class="wo">${wo}</i>` : ""}</span>` : ""}</button>`;
+      aria-label="${label}"${idx === dayIdx ? ` aria-current="true"` : ""}>${day}${dr || wo || sick
+        ? `<span class="pds">${dr ? `<i class="dr">${dr}</i>` : ""}${wo ? `<i class="wo">${wo}</i>` : ""}${sick ? `<i class="sk"></i>` : ""}</span>` : ""}</button>`;
   }
 
   $("day-picker-body").innerHTML = `

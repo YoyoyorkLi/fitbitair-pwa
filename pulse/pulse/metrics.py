@@ -892,7 +892,7 @@ def recovery_load(hrv, hrv_hist, sleep_hr, sleep_hr_hist, rr, rr_hist,
     trailing median + MAD computed here from *_hist.
 
     Returns ~0..3, or None if no marker has enough history. Bands live in the
-    reader: < 0.5 settled, < 1.0 elevated, else high.
+    reader: < 0.6 settled, < 1.0 elevated, else high.
     """
     d = {}
 
@@ -943,8 +943,12 @@ def recovery_load(hrv, hrv_hist, sleep_hr, sleep_hr_hist, rr, rr_hist,
 
 
 def load_state(body_load):
-    """< 0.5 settled (0), < 1.0 elevated (1), else high (2). None -> None."""
+    """< 0.6 settled (0), < 1.0 elevated (1), else high (2). None -> None.
+
+    0.6, not 0.5, since baselines leave out drinking and sick nights: the
+    cleaner normal reads every night a little higher, and at 0.5 it added 4
+    sober flags for 1 more drinking night caught (METRICS.md)."""
     if not _isnum(body_load):
         return None
-    return 0 if body_load < 0.5 else 1 if body_load < 1.0 else 2
+    return 0 if body_load < 0.6 else 1 if body_load < 1.0 else 2
 

@@ -346,6 +346,36 @@ def _curve_series(curve, day):
                       for t, b in (curve or []) if b is not None}, dtype=float)
 
 
+def _off_mornings(since):
+    """Mornings (nights-row dates) to leave out of Recovery Load's "normal":
+    the morning after any evening with a logged drink or a "Sick tonight" tag.
+
+    A 30-night median that includes those nights drifts toward them, and a
+    drinking night then looks less unusual than it was. Backtested on the 43
+    nights since drink logging began: separation of drinking from sober nights
+    AUC 0.79 -> 0.83. Flagged nights are deliberately NOT dropped -- that
+    feeds on itself (each flag raises "normal", which flags more) and on the
+    same data flagged 20 of 34 sober nights.
+
+    Empty without credentials or if a read fails; sick_nights may not exist
+    yet (migration 004), which is the same as no sick nights."""
+    _load_local_env()
+    url = (os.getenv("SUPABASE_URL") or "").rstrip("/").removesuffix("/rest/v1")
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
+    if not url or not key:
+        return set()
+    out = set()
+    for table in ("drinks", "sick_nights"):
+        try:
+            rows = _request(url, key, f"/rest/v1/{table}?select=night"
+                            f"&night=gte.{since - pd.Timedelta(days=1):%Y-%m-%d}", method="GET") or []
+        except RuntimeError as e:
+            print(f"warning: could not read {table} for baselines: {e}")
+            continue
+        out |= {pd.Timestamp(r["night"]) + pd.Timedelta(days=1) for r in rows}
+    return out
+
+
 def _stored_history(since):
     """Overnight-HR series for nights already in Supabase, from `since` on:
     (minutes to nadir, nadir bpm, settle minutes), each {night -> value}.
@@ -474,12 +504,19 @@ def build_rows(con=None):
     # The hourly sync only holds ~5 days of heart-rate, so the local series
     # alone gave a "baseline" of 3 nights. Fill the rest of the window from
     # what earlier runs already stored; local values win where both exist.
+    off = set()
     if nadir:
         since = min(nadir) - pd.Timedelta(days=cfg.BASELINE_DAYS)
         for local, stored in zip((nadir_min_series, floor_series, settle_series),
                                  _stored_history(since)):
             for k, v in stored.items():
                 local.setdefault(k, v)
+        off = _off_mornings(since)
+    # Recovery Load's markers -- and the baselines the app shows next to
+    # them -- compare against normal nights only (see _off_mornings).
+    normal = lambda series: {k: v for k, v in series.items() if k not in off}  # noqa: E731
+    hrv_n, deep_n, nonrem_n = normal(hrv_map), normal(deep_rmssd), normal(non_rem_hr)
+    rr_n, floor_n, settle_n = normal(rr), normal(floor_series), normal(settle_series)
 
     rows = []
     for _, r in m.iterrows():
@@ -491,28 +528,28 @@ def build_rows(con=None):
         st = skin_temp.get(night)                       # (nightly, baseline, sd) | None
         sb = spo2_bnd.get(night)                        # (lower_pct, sd_pct) | None
         body_load = mx.recovery_load(
-            hrv_map.get(night), _hist(hrv_map, night),
-            non_rem_hr.get(night), _hist(non_rem_hr, night),
-            rr.get(night), _hist(rr, night),
+            hrv_map.get(night), _hist(hrv_n, night),
+            non_rem_hr.get(night), _hist(nonrem_n, night),
+            rr.get(night), _hist(rr_n, night),
             (st[0] - st[1]) if st else None,
             st[2] if st else None,
             hrv_deep=deep_rmssd.get(night),
-            hrv_deep_hist=_hist(deep_rmssd, night),
-            hr_floor=floor_series.get(night), hr_floor_hist=_hist(floor_series, night),
-            settle=settle_series.get(night), settle_hist=_hist(settle_series, night))
+            hrv_deep_hist=_hist(deep_n, night),
+            hr_floor=floor_series.get(night), hr_floor_hist=_hist(floor_n, night),
+            settle=settle_series.get(night), settle_hist=_hist(settle_n, night))
 
         rows.append({
             "night": night.strftime("%Y-%m-%d"),
             "hrv_rmssd": _clean(hrv_map.get(night)),
             "hrv_baseline": _clean(_baseline(hrv_map, night)),
             "hrv_deep_rmssd": _clean(deep_rmssd.get(night)),
-            "hrv_deep_baseline": _clean(_baseline(deep_rmssd, night)),
+            "hrv_deep_baseline": _clean(_baseline(deep_n, night)),
             "non_rem_hr": _clean(non_rem_hr.get(night)),
-            "non_rem_hr_baseline": _clean(_baseline(non_rem_hr, night)),
+            "non_rem_hr_baseline": _clean(_baseline(nonrem_n, night)),
             "rhr": _clean(rhr_map.get(night)),
             "rhr_baseline": _clean(_baseline(rhr_map, night)),
             "resp_rate": _clean(rr.get(night)),
-            "resp_rate_baseline": _clean(_baseline(rr, night)),
+            "resp_rate_baseline": _clean(_baseline(rr_n, night)),
             "spo2": _clean(spo2.get(night)),
             "spo2_min": _clean(sb[0] if sb else None),
             "spo2_sd": _clean(sb[1] if sb else None),
