@@ -416,10 +416,11 @@ a{color:var(--accent)}
   -webkit-tap-highlight-color:transparent}
 .calcell.has.drink{border-color:var(--drink)}
 .calcell.has.drink .dot{background:var(--drink)}
+/* A count badge, not a bare dot: how many workouts / drinks that day. */
 .calcell .dot{
-  position:absolute;bottom:4px;right:4px;min-width:6px;height:6px;padding:0 2px;
+  position:absolute;bottom:3px;right:3px;min-width:13px;height:13px;padding:0 3px;box-sizing:border-box;
   border-radius:999px;background:var(--strain);color:var(--bg);
-  font-size:8.5px;font-weight:700;line-height:6px;display:flex;align-items:center;justify-content:center;
+  font-size:9px;font-weight:700;line-height:13px;display:flex;align-items:center;justify-content:center;
 }
 /* The Day tab's night picker: the same grid, but every loaded night is a target
    and the one you are on is filled. The overlay is fixed to the viewport, so on
@@ -428,9 +429,10 @@ a{color:var(--accent)}
 .picker{padding-left:max(16px,calc((100vw - 520px)/2));padding-right:max(16px,calc((100vw - 520px)/2))}
 .calcell.pick{cursor:pointer;-webkit-tap-highlight-color:transparent}
 .calcell.pick.sel{background:var(--accent);border-color:var(--accent);color:var(--bg);font-weight:700}
-/* Up to two dots, centred as a pair: drinks the night before, and a workout. */
-.pds{position:absolute;bottom:4px;left:0;right:0;display:flex;justify-content:center;gap:3px}
-.pds i{width:6px;height:6px;border-radius:50%;display:block}
+/* Up to two count badges, centred as a pair: drinks that night, and workouts. */
+.pds{position:absolute;bottom:3px;left:0;right:0;display:flex;justify-content:center;gap:3px}
+.pds i{min-width:13px;height:13px;padding:0 3px;box-sizing:border-box;border-radius:999px;display:block;
+  font-style:normal;font-size:9px;font-weight:700;line-height:13px;text-align:center;color:var(--bg)}
 .pds .dr{background:var(--drink)}
 .pds .wo{background:var(--strain)}
 /* margin-bottom is the fix here, not margin-top: .note is 0-bottom by

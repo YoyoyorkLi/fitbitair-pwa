@@ -1875,7 +1875,7 @@ function renderWorkoutsTab(D) {
     const idx = byDate.get(iso);
     const n = idx != null ? (D.workouts[idx]?.length || 0) : 0;
     cells += n
-      ? `<button type="button" class="calcell has" data-day-idx="${idx}">${day}<span class="dot">${n > 1 ? n : ""}</span></button>`
+      ? `<button type="button" class="calcell has" data-day-idx="${idx}">${day}<span class="dot">${n}</span></button>`
       : `<div class="calcell${idx == null ? " out" : ""}">${day}</div>`;
   }
 
@@ -1927,7 +1927,7 @@ function renderDrinksTab(D) {
     // unlike Workouts (browse-only), this screen's whole point is adding a
     // forgotten night, which by definition starts at zero.
     cells += idx != null
-      ? `<button type="button" class="calcell${n ? " has drink" : ""}" data-drinks-day-idx="${idx}">${day}${n ? `<span class="dot">${n > 1 ? n : ""}</span>` : ""}</button>`
+      ? `<button type="button" class="calcell${n ? " has drink" : ""}" data-drinks-day-idx="${idx}">${day}${n ? `<span class="dot">${n}</span>` : ""}</button>`
       : `<div class="calcell out">${day}</div>`;
   }
 
@@ -2313,11 +2313,11 @@ function renderDayPicker() {
   for (let day = 1; day <= daysInMonth; day++) {
     const idx = byDate.get(`${pickYear}-${pad2(pickMonth + 1)}-${pad2(day)}`);
     if (idx == null) { cells += `<div class="calcell out">${day}</div>`; continue; }
-    const dr = (D.nightRows[idx]?.length || 0) > 0, wo = (D.workouts[idx]?.length || 0) > 0;
+    const dr = D.nightRows[idx]?.length || 0, wo = D.workouts[idx]?.length || 0;
     const label = new Date(pickYear, pickMonth, day).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
     cells += `<button type="button" class="calcell pick${idx === dayIdx ? " sel" : ""}" data-pick-idx="${idx}"
       aria-label="${label}"${idx === dayIdx ? ` aria-current="true"` : ""}>${day}${dr || wo
-        ? `<span class="pds">${dr ? `<i class="dr"></i>` : ""}${wo ? `<i class="wo"></i>` : ""}</span>` : ""}</button>`;
+        ? `<span class="pds">${dr ? `<i class="dr">${dr}</i>` : ""}${wo ? `<i class="wo">${wo}</i>` : ""}</span>` : ""}</button>`;
   }
 
   $("day-picker-body").innerHTML = `
