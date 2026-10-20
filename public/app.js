@@ -48,25 +48,25 @@ const kpi = (c, cap, sub, detail) => detail
   : `<div class="kpi">${c}<p class="cap">${cap}</p><p class="sub">${sub}</p></div>`;
 const stat = (v, k, c) => `<div class="stat"><div class="v"${c ? ` style="color:${c}"` : ""}>${v}</div><div class="k">${k}</div></div>`;
 
-// Which overnight markers moved against baseline, as short phrases. Uses the
-// same "past a floor" gates as metrics.recovery_load so the text matches what
-// actually drove the number.
-function loadMarkers(t) {
-  const b = [];
-  if (ok(t.skinTempDelta) && Math.abs(t.skinTempDelta) >= 0.15)
-    b.push(`skin temp ${t.skinTempDelta > 0 ? "+" : ""}${t.skinTempDelta.toFixed(1)}°C`);
-  // Prefer the deep-sleep RMSSD lens -- what recovery_load now uses for the HRV
-  // marker -- and fall back to the all-night average when it has no baseline.
-  if (ok(t.hrvDeepPct) && t.hrvDeepPct < 92)
-    b.push(`deep-sleep HRV ${Math.round(t.hrvDeepPct)}% of normal`);
-  else if (ok(t.hrv) && ok(t.hrvBaseline) && t.hrv < t.hrvBaseline * 0.92)
-    b.push(`HRV ${Math.round((t.hrv / t.hrvBaseline) * 100)}% of normal`);
-  // Heart rate while asleep, not the all-day resting HR -- what the HR marker
-  // reads since the allergy night it missed (METRICS.md, Recovery Load).
-  if (ok(t.nonRemHrDelta) && t.nonRemHrDelta >= 2) b.push(`sleep HR +${Math.round(t.nonRemHrDelta)}`);
-  if (ok(t.respRateDelta) && t.respRateDelta >= 0.5) b.push(`breathing +${t.respRateDelta.toFixed(1)}`);
-  return b;
-}
+// One row per overnight marker: last night, your normal, and whether it moved
+// the bad way past the same floors metrics.recovery_load uses. A marker with
+// no reading is left out rather than shown as "--".
+const LOAD_ROWS = [
+  // [short name for the home bar, row name, value, normal, off?]
+  (t) => ok(t.hrvDeep) && ok(t.hrvDeepBaseline)
+    ? ["HRV", "Deep-sleep HRV", `${Math.round(t.hrvDeep)} ms`, `${Math.round(t.hrvDeepBaseline)}`, t.hrvDeepBaseline - t.hrvDeep >= 5]
+    : ok(t.hrv) && ok(t.hrvBaseline)
+      ? ["HRV", "HRV", `${Math.round(t.hrv)} ms`, `${Math.round(t.hrvBaseline)}`, t.hrvBaseline - t.hrv >= 3] : null,
+  (t) => ok(t.nonRemHr) && ok(t.nonRemHrDelta)
+    ? ["sleep HR", "Sleep heart rate", `${Math.round(t.nonRemHr)} bpm`, `${Math.round(t.nonRemHr - t.nonRemHrDelta)}`, t.nonRemHrDelta >= 2] : null,
+  (t) => ok(t.floor) && ok(t.floorNorm)
+    ? ["HR floor", "Lowest heart rate", `${Math.round(t.floor)} bpm`, `${Math.round(t.floorNorm)}`, t.floor - t.floorNorm >= 2] : null,
+  (t) => ok(t.respRate) && ok(t.respRateDelta)
+    ? ["breathing", "Breathing rate", `${t.respRate.toFixed(1)}`, `${(t.respRate - t.respRateDelta).toFixed(1)}`, t.respRateDelta >= 0.5] : null,
+  (t) => ok(t.skinTempDelta)
+    ? ["skin temp", "Skin temp", `${t.skinTempDelta > 0 ? "+" : ""}${t.skinTempDelta.toFixed(1)}°C`, "±0", t.skinTempDelta >= 0.15] : null,
+];
+const loadRows = (t) => LOAD_ROWS.map((f) => f(t)).filter(Boolean);
 
 // The Recovery Load status bar under the three dials -- one line every day the
 // signal exists, colour = state, expands with the contributing markers when
@@ -75,14 +75,15 @@ function loadMarkers(t) {
 function loadBar(t) {
   if (!ok(t.bodyLoad) || !Number.isInteger(t.loadState)) return "";
   const s = t.loadState;
-  const bits = loadMarkers(t);
-  const why = s === 0 ? "" : bits.length ? ` — ${bits.join(" · ")}` : "";
-  const drink = t.drinks
-    ? (s === 0 ? ` · ${t.drinks} drink${t.drinks > 1 ? "s" : ""}, no lasting hit`
-      : ` · ${t.drinks} drink${t.drinks > 1 ? "s" : ""} — expected`)
-    : (s > 0 ? " · nothing logged" : "");
+  // Names only -- the numbers live on the Recovery detail. Three at most so
+  // the bar stays one line on a phone.
+  const off = loadRows(t).filter((r) => r[4]).map((r) => r[0]);
+  const sub = [
+    s > 0 && off.length ? `${off.slice(0, 3).join(", ")}${off.length > 3 ? ` +${off.length - 3}` : ""}` : "",
+    t.drinks ? `${t.drinks} drink${t.drinks > 1 ? "s" : ""}` : "",
+  ].filter(Boolean).join(" · ");
   return `<button type="button" class="loadbar l${s}" data-detail="recovery">
-    <span class="lb-dot"></span><span class="lb-txt">Recovery load: <b>${LOAD_WORD[s]}</b>${why}${drink}</span></button>`;
+    <span class="lb-dot"></span><span class="lb-txt">Recovery load: <b>${LOAD_WORD[s]}</b>${sub ? `<span class="lb-sub">${sub}</span>` : ""}</span></button>`;
 }
 // ------------------------------------------------------------------- naps
 // A nap is a sleep session that is not the day's main sleep. push.py stores it
@@ -852,6 +853,15 @@ function hypnoFrom(row) {
 // row only, and called `D.today`; now it is a function of the index the stepper
 // is on. Every field comes out of an array that was already loaded, which is
 // why stepping never touches the network.
+// The HR floor's normal: median of the 30 nights before, same window as
+// push._baseline. NaN under 3 nights.
+function floorNorm(D, i) {
+  const v = (D.hypnos || []).slice(Math.max(0, i - 30), i).map((h) => h?.nadirBpm).filter(ok).sort((a, b) => a - b);
+  if (v.length < 3) return NaN;
+  const m = v.length >> 1;
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+
 function dayView(D, i) {
   const at = (a) => (Array.isArray(a) && ok(a[i]) ? a[i] : NaN);
   const round = (v) => (ok(v) ? Math.round(v) : NaN);
@@ -878,6 +888,9 @@ function dayView(D, i) {
     loadState: Array.isArray(D.loadState) && Number.isInteger(D.loadState[i]) ? D.loadState[i] : NaN,
     skinTempDelta: at(D.skinTempDelta), respRateDelta: at(D.respRateDelta), rhrDelta: at(D.rhrDelta),
     hrvDeepPct: at(D.hrvDeepPct), nonRemHrDelta: at(D.nonRemHrDelta),
+    hrvDeep: at(D.hrvDeep), hrvDeepBaseline: at(D.hrvDeepBaseline),
+    nonRemHr: at(D.nonRemHr), respRate: at(D.respRate),
+    floor: D.hypnos?.[i]?.nadirBpm ?? NaN, floorNorm: floorNorm(D, i),
   };
 }
 // The newest night keeps whatever richer object the source handed us (demo.json
@@ -1767,15 +1780,20 @@ function renderDetailBody(kind) {
     const hasNonRem = Array.isArray(D.nonRemHr) && D.nonRemHr.some(ok);
     const hasSpo2Min = Array.isArray(D.spo2Min) && D.spo2Min.some(ok);
     const deepPct = ok(t.hrvDeepPct) ? Math.round(t.hrvDeepPct) : NaN;
-    const bits = loadMarkers(t);
+    const rows = loadRows(t);
+    const cap = t.loadState === 2 ? 8 : t.loadState === 1 ? 11 : NaN;
     const loadCard = ok(t.bodyLoad) && Number.isInteger(t.loadState)
       ? `<div class="card loadcard l${t.loadState}">
           <h2>Recovery load — ${LOAD_WORD[t.loadState]}</h2>
-          <p class="note" style="margin:0">${t.loadState === 0
-            ? "Your sleeping heart rate, how fast it settled, HRV, breathing and skin temperature all sat within their normal range."
-            : `${bits.length ? bits.join(" · ") : "One or more overnight signals ran outside your 30-night normal"}. ${
-                t.drinks ? `The expected hit from ${t.drinks} drink${t.drinks > 1 ? "s" : ""}.`
-                         : "Illness, stress, a late meal, or a missed tap?"} It also caps today's strain ceiling.`}</p></div>`
+          ${rows.length ? `<div class="lrows">
+            <div class="lrow lhead"><span></span><span>Last night</span><span>Normal</span></div>
+            ${rows.map(([, name, v, norm, off]) =>
+              `<div class="lrow${off ? " off" : ""}"><span>${name}</span><span>${v}</span><span>${norm}</span></div>`).join("")}
+          </div>` : ""}
+          ${(() => {
+            const foot = [t.drinks ? `${t.drinks} drink${t.drinks > 1 ? "s" : ""}` : "", ok(cap) ? `Strain capped at ${cap}` : ""].filter(Boolean);
+            return foot.length ? `<p class="lfoot">${foot.join(" · ")}</p>` : "";
+          })()}</div>`
       : "";
     return `
       <div class="detail-dial">${ch.ring(t.recovery, recCol, "Recovery", `Recovery ${t.recovery}|55% HRV · 25% resting HR · 20% sleep`)}</div>

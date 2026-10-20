@@ -156,6 +156,7 @@ a{color:var(--accent)}
   color:var(--muted);cursor:pointer;-webkit-tap-highlight-color:transparent}
 .loadbar .lb-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
 .loadbar .lb-txt b{color:var(--text);font-weight:600}
+.loadbar .lb-sub{display:block;margin-top:2px;font-size:12px;color:var(--muted)}
 .loadbar.l1{border-left-color:var(--awake)}
 .loadbar.l1 .lb-dot{background:var(--awake)}
 .loadbar.l2{border-left-color:var(--warn)}
@@ -169,6 +170,15 @@ a{color:var(--accent)}
 .loadcard.l1{border-left:2px solid var(--awake)}
 .loadcard.l2{border-left:2px solid var(--warn)}
 .loadcard.l0{border-left:2px solid var(--good)}
+/* Recovery load breakdown: marker, last night, normal. A marker that moved
+   the bad way reads in full colour; the rest sit back in muted. */
+.lrows{display:grid;grid-template-columns:1fr auto auto;column-gap:18px;row-gap:9px;font-size:13.5px;font-variant-numeric:tabular-nums}
+.lrow{display:contents;color:var(--muted)}
+.lrow span:nth-child(n+2){text-align:right}
+.lrow.lhead{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+.lrow.off{color:var(--text)}
+.lrow.off span:nth-child(2){color:var(--warn);font-weight:700}
+.lfoot{margin:14px 0 0;font-size:13px;color:var(--muted)}
 
 .card{background:var(--panel);border:1px solid var(--grid);border-radius:6px;padding:18px;margin-bottom:14px}
 /* Flex, not the toggles floating in an absolutely-positioned corner: an
