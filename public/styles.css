@@ -45,9 +45,18 @@ a{color:var(--accent)}
    Trends' chart card, and now the full-width buttons that open Workouts
    ("Sick tonight") and Drinks ("Log drink now"). A little more for all three. */
 #trends{padding-top:calc(var(--top-gap) + 12px)}
-/* Workouts and Drinks open on a full-width button, which needs more air than a
-   card: about where the Day tab's content starts under its date header. */
-#workouts,#drinks{padding-top:calc(var(--top-gap) + 30px)}
+/* Workouts and Drinks open on their calendar, with a little more air than
+   Trends. Their one action button ("Sick tonight", "Log drink now") is docked
+   just above the tab bar (.dock), so the page leaves room for it at the end. */
+#workouts,#drinks{padding-top:calc(var(--top-gap) + 30px);padding-bottom:72px}
+/* Same frame as the tab bar -- fixed, same max width, offset by its height --
+   so if the bar ever moves on iOS, the dock moves with it. Lives inside its
+   tab's container, so it hides with the tab. */
+.dock{position:fixed;left:0;right:0;z-index:14;max-width:760px;margin:0 auto;
+  bottom:calc(var(--tabbar-h) + env(safe-area-inset-bottom));
+  padding:10px 16px;background:var(--bg)}
+.dock .lognow,.dock .sicknow{margin:0}
+.aftercal{margin-top:22px}
 
 /* Night selector. Meets Apple's 44px touch-target advice. Arrow keys and the
    swipe gesture are the other two ways in. */

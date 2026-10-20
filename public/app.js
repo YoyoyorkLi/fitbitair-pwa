@@ -1947,9 +1947,6 @@ function renderWorkoutsTab(D) {
   // drink, and it should not sit next to the drink button's urgency.
   const sickTonight = !!D.sickNights?.has(sickKey(D));
   $("workouts").innerHTML = `
-    <button type="button" class="sicknow${sickTonight ? " on" : ""}" data-sick-toggle aria-pressed="${sickTonight}">
-      ${sickTonight ? "Sick tonight · logged" : "Sick tonight"}
-    </button>
     <div class="calnav">
       <button class="nav" id="cal-prev" type="button" aria-label="Previous month">‹</button>
       <p class="calmonth">${monthLabel}</p>
@@ -1958,6 +1955,11 @@ function renderWorkoutsTab(D) {
     <div class="calgrid">
       ${CAL_WEEKDAYS.map((d) => `<div class="calhead">${d}</div>`).join("")}
       ${cells}
+    </div>
+    <div class="dock">
+      <button type="button" class="sicknow${sickTonight ? " on" : ""}" data-sick-toggle aria-pressed="${sickTonight}">
+        ${sickTonight ? "Sick tonight · logged" : "Sick tonight"}
+      </button>
     </div>`;
 }
 
@@ -2006,9 +2008,6 @@ function renderDrinksTab(D) {
   const tn = (D.tonight || []).slice().sort((a, b) => a.logged_at - b.logged_at);
   const time12 = (d) => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
   const nowBlock = `
-    <button type="button" class="lognow" data-log-now>
-      <span class="plus">+</span> Log drink now
-    </button>
     ${tn.length ? `<div class="nowlist">
       <p class="nowhd">Tonight — <b>${tn.length}</b></p>
       ${tn.map((r, k) => `<div class="nowrow"><span class="nown">${k + 1}</span>
@@ -2017,8 +2016,6 @@ function renderDrinksTab(D) {
     </div>` : ""}`;
 
   $("drinks").innerHTML = `
-    ${nowBlock}
-    ${tn.length ? bedPlanner(D, tn) : ""}
     <div class="calnav">
       <button class="nav" id="drcal-prev" type="button" aria-label="Previous month">‹</button>
       <p class="calmonth">${monthLabel}</p>
@@ -2027,6 +2024,12 @@ function renderDrinksTab(D) {
     <div class="calgrid">
       ${CAL_WEEKDAYS.map((d) => `<div class="calhead">${d}</div>`).join("")}
       ${cells}
+    </div>
+    ${tn.length ? `<div class="aftercal">${nowBlock}${bedPlanner(D, tn)}</div>` : ""}
+    <div class="dock">
+      <button type="button" class="lognow" data-log-now>
+        <span class="plus">+</span> Log drink now
+      </button>
     </div>`;
 }
 
