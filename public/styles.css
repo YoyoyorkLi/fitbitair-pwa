@@ -46,9 +46,9 @@ a{color:var(--accent)}
    ("Sick tonight") and Drinks ("Log drink now"). A little more for all three. */
 #trends{padding-top:calc(var(--top-gap) + 12px)}
 /* Workouts and Drinks open on their calendar, with a little more air than
-   Trends, and the page's one action button (.midzone) sits 20px under it. */
+   Trends, and the page's one action button (.midzone) sits 30px under it. */
 #workouts,#drinks{padding-top:calc(var(--top-gap) + 30px)}
-.midzone{margin-top:20px}
+.midzone{margin-top:30px}
 .midzone .lognow,.midzone .sicknow{margin:0}
 .aftercal{margin-top:22px}
 
