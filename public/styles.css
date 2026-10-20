@@ -46,17 +46,15 @@ a{color:var(--accent)}
    ("Sick tonight") and Drinks ("Log drink now"). A little more for all three. */
 #trends{padding-top:calc(var(--top-gap) + 12px)}
 /* Workouts and Drinks open on their calendar, with a little more air than
-   Trends. Their one action button ("Sick tonight", "Log drink now") is docked
-   just above the tab bar (.dock), so the page leaves room for it at the end. */
-#workouts,#drinks{padding-top:calc(var(--top-gap) + 30px);padding-bottom:72px}
-/* Same frame as the tab bar -- fixed, same max width, offset by its height --
-   so if the bar ever moves on iOS, the dock moves with it. Lives inside its
-   tab's container, so it hides with the tab. */
-.dock{position:fixed;left:0;right:0;z-index:14;max-width:760px;margin:0 auto;
-  bottom:calc(var(--tabbar-h) + env(safe-area-inset-bottom));
-  padding:10px 16px;background:var(--bg)}
-.dock .lognow,.dock .sicknow{margin:0}
-.aftercal{margin-top:22px}
+   Trends. Each page is at least as tall as the space down to the tab bar, so
+   .midzone (the one action button) can sit centred between the calendar and
+   the bar. When tonight's list fills that space, the button just follows the
+   calendar. [hidden] still wins over the display:flex here. */
+#workouts,#drinks{padding-top:calc(var(--top-gap) + 30px);display:flex;flex-direction:column;
+  min-height:calc(100dvh - max(22px, env(safe-area-inset-top)) - var(--tabbar-h) - env(safe-area-inset-bottom))}
+.midzone{flex:1;display:flex;flex-direction:column;justify-content:center;padding:18px 0}
+.midzone .lognow,.midzone .sicknow{margin:0}
+.aftercal{margin-top:4px}
 
 /* Night selector. Meets Apple's 44px touch-target advice. Arrow keys and the
    swipe gesture are the other two ways in. */
@@ -319,7 +317,7 @@ a{color:var(--accent)}
 .lognow{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
   appearance:none;-webkit-appearance:none;
   background:var(--drink);color:#0B0E14;border:0;border-radius:6px;
-  padding:11px 16px;margin-bottom:16px;font-weight:600;font-size:14.5px;line-height:1.2;
+  padding:15px 16px;margin-bottom:16px;font-weight:600;font-size:16px;line-height:1.2;
   letter-spacing:-.01em;-webkit-tap-highlight-color:transparent}
 .lognow:active{filter:brightness(.92)}
 .lognow .plus{font-size:17px;font-weight:500;line-height:1;margin-top:-1px}
@@ -327,7 +325,7 @@ a{color:var(--accent)}
    brightens it -- no fill, no red. */
 .sicknow{display:block;width:100%;appearance:none;-webkit-appearance:none;
   background:none;color:var(--muted);border:1px solid var(--grid);border-radius:6px;
-  padding:10px 16px;margin:0 0 16px;font:inherit;font-weight:600;font-size:14px;
+  padding:14px 16px;margin:0 0 16px;font:inherit;font-weight:600;font-size:16px;line-height:1.2;
   -webkit-tap-highlight-color:transparent}
 .sicknow.on{color:var(--text);border-color:var(--muted);background:var(--panel)}
 .nowlist{margin:0 0 22px}

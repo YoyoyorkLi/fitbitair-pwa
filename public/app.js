@@ -1956,7 +1956,7 @@ function renderWorkoutsTab(D) {
       ${CAL_WEEKDAYS.map((d) => `<div class="calhead">${d}</div>`).join("")}
       ${cells}
     </div>
-    <div class="dock">
+    <div class="midzone">
       <button type="button" class="sicknow${sickTonight ? " on" : ""}" data-sick-toggle aria-pressed="${sickTonight}">
         ${sickTonight ? "Sick tonight · logged" : "Sick tonight"}
       </button>
@@ -2025,12 +2025,12 @@ function renderDrinksTab(D) {
       ${CAL_WEEKDAYS.map((d) => `<div class="calhead">${d}</div>`).join("")}
       ${cells}
     </div>
-    ${tn.length ? `<div class="aftercal">${nowBlock}${bedPlanner(D, tn)}</div>` : ""}
-    <div class="dock">
+    <div class="midzone">
       <button type="button" class="lognow" data-log-now>
         <span class="plus">+</span> Log drink now
       </button>
-    </div>`;
+    </div>
+    ${tn.length ? `<div class="aftercal">${nowBlock}${bedPlanner(D, tn)}</div>` : ""}`;
 }
 
 // The dose-response chart pools every night the account has ever had -- more
