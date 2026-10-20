@@ -44,7 +44,10 @@ a{color:var(--accent)}
 /* At the shared gap the first thing on these pages crowds the status bar --
    Trends' chart card, and now the full-width buttons that open Workouts
    ("Sick tonight") and Drinks ("Log drink now"). A little more for all three. */
-#workouts,#drinks,#trends{padding-top:calc(var(--top-gap) + 12px)}
+#trends{padding-top:calc(var(--top-gap) + 12px)}
+/* Workouts and Drinks open on a full-width button, which needs more air than a
+   card: about where the Day tab's content starts under its date header. */
+#workouts,#drinks{padding-top:calc(var(--top-gap) + 30px)}
 
 /* Night selector. Meets Apple's 44px touch-target advice. Arrow keys and the
    swipe gesture are the other two ways in. */
