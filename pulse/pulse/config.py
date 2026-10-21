@@ -83,6 +83,11 @@ STRAIN_CEILING_LOAD_CAP = {1: 11.0, 2: 8.0}
 # filed under tomorrow. None = auto-detect from the OS.
 TIMEZONE = os.getenv("PULSE_TZ") or None
 
+# Which devices' readings count. Google Health merges every source on the
+# account -- the iPhone's Apple Health data arrives as HEALTH_KIT -- and summing
+# them double-counted steps. Fitbit only (ingest._from_tracker).
+SOURCE_PLATFORMS = ("FITBIT",)
+
 # Sleep sessions shorter than this are naps, not the main sleep.
 MIN_MAIN_SLEEP_MIN = 180
 

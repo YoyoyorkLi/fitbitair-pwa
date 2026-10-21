@@ -62,8 +62,20 @@ def _pit(dt, p):
     return str(key)
 
 
+def _from_tracker(p):
+    """Only the Fitbit's own readings. Google Health also holds the iPhone's
+    Apple Health data (dataSource.platform HEALTH_KIT): its steps were being
+    ADDED to the Fitbit's -- every daily total about double (Sep 28 2026:
+    15,489 Fitbit + 14,547 iPhone = 30,036 shown) -- and it carries heart rate,
+    workouts and the odd daily HRV too. A daily point is keyed by its date, so
+    an iPhone value could also silently REPLACE the Fitbit one for that day.
+    A point with no dataSource is kept."""
+    plat = (p.get("dataSource") or {}).get("platform")
+    return plat is None or plat in cfg.SOURCE_PLATFORMS
+
+
 def save(data_type, points, con):
-    rows = [(data_type, _pit(data_type, p), json.dumps(p)) for p in points]
+    rows = [(data_type, _pit(data_type, p), json.dumps(p)) for p in points if _from_tracker(p)]
     con.executemany("INSERT OR REPLACE INTO raw VALUES (?,?,?)", rows)
     con.commit()
     return len(rows)
@@ -72,7 +84,8 @@ def save(data_type, points, con):
 def load(data_type, con):
     cur = con.execute("SELECT payload FROM raw WHERE data_type=? ORDER BY pit",
                       (data_type,))
-    return [json.loads(r[0]) for r in cur]
+    # Filtered here too: a cache written before the filter still holds iPhone rows.
+    return [p for p in (json.loads(r[0]) for r in cur) if _from_tracker(p)]
 
 
 # ----------------------------------------------------------------- fetch

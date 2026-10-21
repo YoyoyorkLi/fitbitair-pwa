@@ -308,6 +308,16 @@ def settle_minutes_finds_when_hr_reaches_its_floor():
 
 
 @case
+def only_fitbit_readings_are_kept():
+    """iPhone (Apple Health) points are dropped; Fitbit and source-less ones stay."""
+    from . import ingest
+    fit = {"dataSource": {"platform": "FITBIT"}, "steps": {"count": "10"}}
+    phone = {"dataSource": {"platform": "HEALTH_KIT"}, "steps": {"count": "10"}}
+    bare = {"steps": {"count": "10"}}
+    assert [ingest._from_tracker(p) for p in (fit, phone, bare)] == [True, False, True]
+
+
+@case
 def nap_sessions_are_what_main_sleeps_rejects():
     """The naps push.py stores for the app are exactly the sessions main_sleeps()
     rejects and nap_minutes() sums -- one definition, so what the app draws is
