@@ -183,6 +183,10 @@ def sleep_debt_rolls_and_caps():
     # chronic 2h under -> pinned near the cap, never above it
     chronic = mx._sleep_debt(need, need - 120)
     assert chronic[-1] == cfg.SLEEP_DEBT_CAP_MIN, chronic[-1]
+    # One long weekend night can't wipe out a week of short ones: credit per
+    # night is capped. Five nights 1h short, then a 10h night -> still in debt.
+    wk = need[:6].copy(); wk[:5] -= 60; wk[5] = 600
+    assert mx._sleep_debt(need[:6], wk)[-1] > 60, mx._sleep_debt(need[:6], wk)
 
 
 @case
@@ -394,19 +398,19 @@ def naps_count_toward_debt_and_nothing_else():
     nights_all, mains = _nap_fixture()
     assert cfg.NAPS_COUNT_TOWARD_DEBT is True
     naps = mx.nap_credit(nights_all, mains)
-    assert naps.get(mains[10]["end"].normalize()) == 100.0, naps
+    assert naps.get(mains[10]["end"].normalize()) == 100.0 * cfg.NAP_DEBT_CREDIT, naps
 
     no_nap = mx.sleep_series(mains, {}, None, None, None)
     with_nap = mx.sleep_series(mains, {}, None, None, naps)
 
-    assert with_nap["debt"].iloc[10] < no_nap["debt"].iloc[10] - 30, "the nap pays down debt"
+    assert with_nap["debt"].iloc[10] < no_nap["debt"].iloc[10] - 30 * cfg.NAP_DEBT_CREDIT, "the nap pays down debt"
     assert with_nap["debt"].iloc[13] < no_nap["debt"].iloc[13], "and keeps doing so afterwards"
 
     assert (with_nap["asleep"] == no_nap["asleep"]).all(), "the night's duration never includes a nap"
     assert (with_nap["score"].iloc[:11] == no_nap["score"].iloc[:11]).all(), "the nap night's own score is untouched"
     assert (with_nap["score"].iloc[11:] >= no_nap["score"].iloc[11:]).all(), "later targets only relax"
     assert (with_nap["perf"] == no_nap["perf"]).all(), "recovery's sleep term reads the main sleep alone"
-    assert with_nap["asleep_total"].iloc[10] == no_nap["asleep"].iloc[10] + 100, "asleep_total is what debt reads"
+    assert with_nap["asleep_total"].iloc[10] == no_nap["asleep"].iloc[10] + 100 * cfg.NAP_DEBT_CREDIT, "asleep_total is what debt reads"
 
 
 @case

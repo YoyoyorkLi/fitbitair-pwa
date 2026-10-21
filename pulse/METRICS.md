@@ -48,12 +48,19 @@ need = 420 + min(30, 3 · max(0, yesterday_strain − 10))
 for each night i:
     deficit_k  = need_k − asleep_k           for k in the last 14 nights
     contrib_k  = deficit_k            if deficit_k > 0
-               = 0.5 · deficit_k      otherwise      (a night over need pays
-                                                      down at half rate)
+               = max(0.5 · deficit_k, −30)   otherwise   (a night over need pays
+                                                      down at half rate, 30 min max)
     weight_k   = (14 − age_k) / 14           1.0 for last night … 1/14 for the
                                              14th-oldest
     debt_i     = clip( Σ weight_k · contrib_k , 0 , 300 )
 ```
+
+**Credit is capped (Oct 2026).** Uncapped, debt sat at 0 on 21 of 32 nights
+(Sep 20 – Oct 21 2026), including right after back-to-back 5 h 49 / 6 h 12
+nights: one 9.5 h weekend night took ~60 min off, a 8.7 h night plus a nap
+another ~60, and naps counted in full. Now a long night repays at most 30 min,
+and a nap repays half its length (`NAP_DEBT_CREDIT`). Simulated on the same 32
+nights: 4 at zero, and ~90 min of debt on Oct 21.
 
 Why this shape (RISE's model + the chronic-sleep-restriction literature):
 
@@ -85,8 +92,8 @@ as "last night" and wreck the stage numbers. Everything it rejects is a nap —
   morning read; a 2 pm nap shouldn't rewrite how recovered you were at 7 am.
 - **counted in sleep debt — and only there.** `nap_credit()` is the single gate,
   and `NAPS_COUNT_TOWARD_DEBT` in `config.py` (on) lets a nap's minutes into
-  `asleep_total`, which is what debt is computed from. A 90-min nap offsets 90 min
-  of that day's shortfall. Debt is sleep owed against sleep had, and a nap is
+  `asleep_total`, which is what debt is computed from, at `NAP_DEBT_CREDIT` (0.5):
+  a 90-min nap offsets 45 min of that day's shortfall. Debt is sleep owed against sleep had, and a nap is
   sleep had. (WHOOP's own help draws the same line: naps stay out of its Sleep
   Performance and Recovery, and can reduce sleep debt.)
 
@@ -95,9 +102,9 @@ debt you carry *in* (see Sleep score), so a nap that pays debt down relaxes the
 target for the nights after it. It never changes the score of the night it
 follows, and it can only raise later scores, never lower them.
 
-1-for-1 is generous. The research is that a nap eases acute debt without fully
-replacing night sleep, and on a live account one 2.5 h afternoon nap took a ~2 h
-debt to zero. Set `NAPS_COUNT_TOWARD_DEBT = False` to make debt ignore naps
+1-for-1 was too generous, so it is half now. The research is that a nap eases
+acute debt without fully replacing night sleep, and on a live account one 2.5 h
+afternoon nap took a ~2 h debt to zero. Set `NAPS_COUNT_TOWARD_DEBT = False` to make debt ignore naps
 entirely; either way, stored history is only restated as far back as a sync
 rewrites, so run the workflow with `full: true` after changing it.
 

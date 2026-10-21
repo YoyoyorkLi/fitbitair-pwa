@@ -126,7 +126,7 @@ function napCards(naps) {
     const parts = [`<b>${shortDur(n.min)}</b> asleep of ${shortDur(n.in_bed)} in bed`];
     if (hyp) parts.push(`deep ${shortDur(stageMin(n, "DEEP"))}`, `REM ${shortDur(stageMin(n, "REM"))}`);
     return card(`Nap — ${napTime(n)}`, ch.hypnogram(W, hyp, 200), parts.join(" · "));
-  }).join("") + `<p class="note" style="margin:-4px 2px 16px">Naps are shown on their own — they are not part of your sleep time, Sleep Score or recovery. Their minutes do count toward sleep debt.</p>`;
+  }).join("") + `<p class="note" style="margin:-4px 2px 16px">Naps are shown on their own — they are not part of your sleep time, Sleep Score or recovery. Half their minutes count toward sleep debt.</p>`;
 }
 
 // Scrubbable charts get a readout row between the title and the chart: the

@@ -60,6 +60,10 @@ SLEEP_NEED_HARDDAY_MAX = 30             # up to +30 min the night after a hard d
 SLEEP_DEBT_WINDOW = 14                   # nights in the rolling window
 SLEEP_DEBT_CAP_MIN = 300                 # 5h -- RISE's "manageable" ceiling
 SLEEP_DEBT_SURPLUS_CREDIT = 0.5          # a night over NEED pays down at half rate
+# ...and at most this many minutes per night (after the half rate). Uncapped,
+# one 9.5h weekend night took ~60 min off and debt sat at 0 on 21 of 32 nights
+# (Sep 20 - Oct 21 2026), including after back-to-back 5h49 / 6h12 nights.
+SLEEP_DEBT_SURPLUS_CAP = 30
 
 # The sleep SCORE's duration term is judged against NEED plus a slice of the
 # debt you carried INTO the night (the debt vs the score are otherwise
@@ -102,6 +106,10 @@ MIN_MAIN_SLEEP_MIN = 180
 # night sleep. Off makes debt ignore naps entirely. Either way, stored history is
 # only restated as far back as a sync rewrites: run the workflow with full=true.
 NAPS_COUNT_TOWARD_DEBT = True
+# ...at this rate. 1.0 let two afternoon naps (Oct 13/14 2026) turn two short
+# nights into surplus ones; naps ease acute debt without fully replacing night
+# sleep, so a nap minute now repays half a minute.
+NAP_DEBT_CREDIT = 0.5
 
 # ---- Google Health API -------------------------------------------------
 API_ROOT = "https://health.googleapis.com/v4"

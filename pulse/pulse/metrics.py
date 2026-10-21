@@ -427,7 +427,9 @@ def nap_credit(nights_all, mains):
     recovery's sleep term regardless. This is the single gate; render.py calls it
     rather than nap_minutes() so the setting cannot be bypassed.
     """
-    return nap_minutes(nights_all, mains) if cfg.NAPS_COUNT_TOWARD_DEBT else {}
+    if not cfg.NAPS_COUNT_TOWARD_DEBT:
+        return {}
+    return {d: m * cfg.NAP_DEBT_CREDIT for d, m in nap_minutes(nights_all, mains).items()}
 
 
 # ------------------------------------------------------------ heart / zones
@@ -659,11 +661,13 @@ def _sleep_debt(need, asleep):
     A shortfall from beyond the window is simply gone -- not "repaid" but aged
     out, matching that subjective sleepiness adapts to chronic restriction
     even as the deficit persists. A night OVER need pays down at
-    SLEEP_DEBT_SURPLUS_CREDIT rate: catch-up sleep helps, but slowly.
+    SLEEP_DEBT_SURPLUS_CREDIT rate, and by at most SLEEP_DEBT_SURPLUS_CAP
+    minutes: catch-up sleep helps, but one long night can't erase a week.
     """
     deficit = np.asarray(need, float) - np.asarray(asleep, float)
     contrib = np.where(deficit > 0, deficit,
-                       cfg.SLEEP_DEBT_SURPLUS_CREDIT * deficit)
+                       np.maximum(cfg.SLEEP_DEBT_SURPLUS_CREDIT * deficit,
+                                  -float(cfg.SLEEP_DEBT_SURPLUS_CAP)))
     W = int(cfg.SLEEP_DEBT_WINDOW)
     out = np.zeros(len(deficit))
     for i in range(len(deficit)):
