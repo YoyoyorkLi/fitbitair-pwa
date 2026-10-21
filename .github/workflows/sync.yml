@@ -1,7 +1,8 @@
 name: sync
 
-# Hourly: catch Google Health up, compute nights, push the recent ones to
-# Supabase.
+# Every 30 min: catch Google Health up, compute nights, push the recent ones to
+# Supabase. The reliable trigger is the Cloudflare cron in cron/, which calls
+# /api/sync -> workflow_dispatch; the schedule below is only a backup.
 #
 # This used to pull a fresh 30 days every run -- ~30 sequential one-day
 # heart-rate requests, ~4 minutes. Nothing is cached between runs on purpose:
@@ -34,14 +35,14 @@ on:
   workflow_dispatch:
     inputs:
       full:
-        description: "Re-pull 60 days and re-push every night (metrics.py change / repair)"
+        description: "Re-pull 120 days and re-push every night (metrics.py change / repair)"
         type: boolean
         default: false
 
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: pulse
@@ -78,10 +79,14 @@ jobs:
           GH_REFRESH_TOKEN: ${{ secrets.GH_REFRESH_TOKEN }}
 
       # Normal run: `push sync` == catch-up ingest.sync() + push, no HTML build.
-      # full=true instead: `push 60` re-pulls 60 days of everything (including
-      # heart-rate, one request per day) and re-pushes every night. Anything
-      # deeper is a local `python -m pulse push <N>`.
-      - run: python -m pulse ${{ (github.event_name == 'workflow_dispatch' && inputs.full) && 'push 60' || 'push sync' }}
+      # full=true instead: `push 120` re-pulls 120 days of everything (including
+      # heart-rate, one request per day) and re-pushes every night. 120, not 60:
+      # each night's baselines look back 30 nights and its debt 14, so a short
+      # window rewrote its own oldest nights with thin or blank baselines. 120
+      # covers the whole history (it starts Jul 30 2026) -- raise it once the
+      # account is older than that. Anything deeper is a local
+      # `python -m pulse push <N>`.
+      - run: python -m pulse ${{ (github.event_name == 'workflow_dispatch' && inputs.full) && 'push 120' || 'push sync' }}
         env:
           GH_CLIENT_ID: ${{ secrets.GH_CLIENT_ID }}
           GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}

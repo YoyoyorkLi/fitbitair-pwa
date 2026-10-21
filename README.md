@@ -10,21 +10,24 @@ separation for us:
 ```
 api/       serverless functions   — the backend. Node, service_role key.
 lib/       server-side helpers    — imported by api/, never shipped to a browser.
-public/    static files           — the PWA. Anon key, RLS-fenced, reads only.
+public/    static files           — the PWA. Anon key + your signed-in session, RLS-fenced.
+cron/      Cloudflare Worker      — calls /api/sync every 30 min. Deployed with wrangler.
 ```
 
-The rule that keeps it honest: **nothing in `public/` ever writes a drink.**
-Taps go through `api/tap.js` with the tag token; the PWA reads through
-PostgREST with the anon key. The two halves share no code and no credentials.
+The rule that keeps it honest: **no key that can write ships in `public/`.**
+NFC taps go through `api/tap.js` with the tag token. The PWA reads, and writes
+only drinks and sick tags, through PostgREST as your signed-in Supabase user;
+row-level security does the rest. The two halves share no code and no
+credentials.
 
 ## The other half
 
 The Google Health sync, the derived metrics (strain, recovery, sleep score),
-the Supabase schema, and the hourly push all live in **[`pulse/`](pulse/)** —
+the Supabase schema, and the sync itself all live in **[`pulse/`](pulse/)** —
 a Python project nested in this same repo, but a separate deploy target from
 everything above it. Vercel builds this repo's root (`api/`, `public/`) and
 never looks inside `pulse/`; GitHub Actions ([`.github/workflows/sync.yml`](.github/workflows/sync.yml))
-runs *only* what's inside `pulse/`, on its own hourly schedule, and never
+runs *only* what's inside `pulse/`, every 30 minutes, and never
 touches `api/` or `public/`. The PWA only ever reads what `pulse/push.py`
 writes, through the `night_summary` view — it never talks to Google, and
 never runs Python. `pulse/sql/schema.sql` and `pulse/pulse/push.py`,
@@ -32,27 +35,41 @@ referenced below, live under that directory.
 
 ## Scheduled sync
 
-`.github/workflows/sync.yml` runs `pulse push sync` hourly. It needs six repo
-secrets (**Settings → Secrets and variables → Actions**):
+`.github/workflows/sync.yml` runs `pulse push sync` every 30 minutes. GitHub's
+own schedule is best-effort on a quiet repo (the last 100 scheduled runs landed
+a median 4.6 h apart), so the real trigger is the Cloudflare Worker in
+[`cron/`](cron/): on `*/30` it POSTs `/api/sync` with `SYNC_KEY`, and
+`api/sync.js` dispatches the workflow with `GH_DISPATCH_TOKEN`. The workflow's
+own schedule stays as a backup.
+
+The workflow needs seven repo secrets (**Settings → Secrets and variables →
+Actions**):
 
 | Secret | Where it comes from |
 |---|---|
 | `GH_CLIENT_ID`, `GH_CLIENT_SECRET` | `pulse/.env` |
 | `GH_REFRESH_TOKEN` | `pulse/.token.json`'s `refresh_token` field |
 | `PULSE_TZ` | `America/Chicago` |
+| `PULSE_AGE` | your age, for max HR (Tanaka). Missing, every run silently uses 23 |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | `.env.local` |
+
+The trigger side needs `SYNC_KEY` in two places with the same value: a Vercel
+env var (Production), and the worker's secret (`cd cron && npx wrangler secret
+put SYNC_KEY`). Vercel also holds `GH_DISPATCH_TOKEN` (Actions: read and write
+on this repo) and `GH_REPO`.
 
 `GH_REFRESH_TOKEN` is minted by [`pulse/refresh_login.sh`](pulse/refresh_login.sh).
 The OAuth app is in production, so it doesn't expire on a schedule — re-mint it
 only if a run fails auth (see [`pulse/WORKFLOW.md`](pulse/WORKFLOW.md) §2b/2d).
 
-Each hourly run pulls ~5 days of heart-rate (a finished day never changes) plus
+Each run pulls ~5 days of heart-rate (a finished day never changes) plus
 a ~35-day window of the cheap daily metrics for baselines, all requests
 concurrent, and upserts only the ~5 recent nights those cover — older Supabase
 rows are already correct. A run takes well under a minute; nothing is cached
 between runs. To rebuild the whole history — first setup, or after a
 `metrics.py` change — click **Run workflow** in the Actions tab with **full:
-true**.
+true**: it re-pulls 120 days and re-pushes every night (upserts on the night,
+deletes nothing; drinks and sick tags are never touched).
 
 ## Deploy
 

@@ -454,7 +454,7 @@ window of the cheap daily/sleep/steps types** so `push` can still compute a
 `build_rows()` keys off the heart-rate days, so only those ~5 nights are
 upserted — the rest of Supabase is already correct. A run is now well under a
 minute. **Nothing is cached between runs**: this repo is public, and `pulse.db`
-is raw health history. **Actions → Run workflow → full: true** re-pulls 90 days
+is raw health history. **Actions → Run workflow → full: true** re-pulls 120 days
 of everything and re-pushes every night, for a `metrics.py` change or a repair.
 
 The `launchd` approach below is the alternative for running this **entirely
@@ -572,7 +572,7 @@ fixed healthy ranges rather than your own baseline (which needs ~7 nights).
 
 **A `metrics.py` change needs a full re-sync.** The Supabase rows are computed
 at sync time, so retuning a constant only takes effect for nights synced after.
-Actions → Run workflow → **full: true** re-pulls 90 days and re-pushes every
+Actions → Run workflow → **full: true** re-pulls 120 days and re-pushes every
 night.
 
 ---

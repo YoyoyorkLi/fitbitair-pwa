@@ -146,8 +146,8 @@ DEFAULT_WINDOW_DAYS = 45
 CATCHUP_HR_DAYS = 3
 CATCHUP_HIST_DAYS = 35
 
-# Concurrent Google requests. The catch-up set is ~15 requests, a `push 60`
-# repair ~150; 12 workers clears either in a couple of rounds and stays under
+# Concurrent Google requests. The catch-up set is ~15 requests, a `push 120`
+# repair ~300; 12 workers clears either in a couple of rounds and stays under
 # the 300 req/min per-user ceiling (fetch() also backs off on a 429).
 SYNC_WORKERS = 12
 
