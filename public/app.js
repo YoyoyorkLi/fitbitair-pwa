@@ -153,6 +153,53 @@ const RING_RED_BELOW = 34;
 const RING_GOOD = { recovery: 67, sleep: 80 };
 const ringCol = (v, good) => (v >= good ? col("good") : v >= RING_RED_BELOW ? col("awake") : col("warn"));
 
+// ---------------------------------------------------------- report pieces
+// The Day tab and the detail screens read like a lab report: three rings up
+// top, then one row per measure -- name, a low/high flag only when it is out,
+// the number, and your normal at the right edge. Sections are a heading with
+// one hairline, no boxes. Collapsed state is per session, shared by the Day
+// tab and the Recovery screen.
+let loadOpen = false, metricsOpen = false, nightOpen = false;
+function ringSVG(v, max, color, sw = 7) {
+  const R = 50 - sw / 2 - 1, L = 2 * Math.PI * R, f = ok(v) ? Math.max(0, Math.min(1, v / max)) : 0;
+  return `<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="${R}" fill="none" stroke="${col("panel2")}" stroke-width="${sw}"/>` +
+    `<circle cx="50" cy="50" r="${R}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round" stroke-dasharray="${(L * f).toFixed(1)} ${L.toFixed(1)}" transform="rotate(-90 50 50)"/></svg>`;
+}
+const ringNum = (v, max, color, num, big) =>
+  `<div class="ring${big ? " lg" : ""}">${ringSVG(v, max, color, big ? 10 : 7)}<span class="n" style="color:${color}"><span class="nv">${num}</span></span></div>`;
+const ringBtn = (kind, v, max, color, num, label, sub) =>
+  `<button type="button" class="ringbtn" data-detail="${kind}">${ringNum(v, max, color, num)}<span class="rl">${label}</span><span class="rs">${sub}</span></button>`;
+const chev = (open) => `<svg class="chev${open ? " open" : ""}" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`;
+const repRow = (name, v, unit, normal, flag) =>
+  `<div class="row${flag ? " out" : ""}"><span class="nm">${name}</span><span class="f">${flag || ""}</span><span class="v">${v}${unit ? `<small>${unit}</small>` : ""}</span><span class="nl">normal ${normal}</span></div>`;
+const hmc = (m) => (ok(m) ? `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, "0")}` : "—");
+
+// Recovery load: the header (state chip, score out of 3) is always shown; the
+// marker rows open on tap. Floors match metrics.recovery_load.
+function loadReport(t) {
+  if (!ok(t.bodyLoad) || !Number.isInteger(t.loadState)) return "";
+  const st = t.loadState, r = Math.round, rows = [];
+  if (ok(t.hrvDeep) && ok(t.hrvDeepBaseline))
+    rows.push(repRow("Deep-sleep HRV", r(t.hrvDeep), "ms", r(t.hrvDeepBaseline), t.hrvDeepBaseline - t.hrvDeep >= 5 ? "low" : ""));
+  else if (ok(t.hrv) && ok(t.hrvBaseline))
+    rows.push(repRow("HRV", r(t.hrv), "ms", r(t.hrvBaseline), t.hrvBaseline - t.hrv >= 3 ? "low" : ""));
+  if (ok(t.nonRemHr) && ok(t.nonRemHrDelta))
+    rows.push(repRow("Sleep heart rate", r(t.nonRemHr), "bpm", r(t.nonRemHr - t.nonRemHrDelta), t.nonRemHrDelta >= 2 ? "high" : ""));
+  if (ok(t.floor) && ok(t.floorNorm))
+    rows.push(repRow("Lowest heart rate", r(t.floor), "bpm", r(t.floorNorm), t.floor - t.floorNorm >= 2 ? "high" : ""));
+  if (ok(t.respRate) && ok(t.respRateDelta))
+    rows.push(repRow("Breathing", t.respRate.toFixed(1), "", (t.respRate - t.respRateDelta).toFixed(1), t.respRateDelta >= 0.5 ? "high" : ""));
+  if (ok(t.skinTempDelta))
+    rows.push(repRow("Skin temp", `${t.skinTempDelta > 0 ? "+" : t.skinTempDelta < 0 ? "−" : ""}${Math.abs(t.skinTempDelta).toFixed(1)}`, "°C", "±0", t.skinTempDelta >= 0.15 ? "high" : ""));
+  const cap = st === 2 ? 8 : st === 1 ? 11 : NaN;
+  const foot = [t.sick ? "Sick" : "", t.drinks ? `${t.drinks} drink${t.drinks > 1 ? "s" : ""}` : "", ok(cap) ? `strain capped at ${cap}` : ""].filter(Boolean).join(" · ");
+  return `<div class="sec">
+    <button type="button" class="hd hdb" data-loadtoggle aria-expanded="${loadOpen}"><b>Recovery load</b><span class="hr"><span class="chip l${st}">${LOAD_WORD[st].toUpperCase()}</span>${chev(loadOpen)}</span></button>
+    <div class="score"><span><b>${t.bodyLoad.toFixed(2)}</b> of 3</span><span>elevated 0.6+ · high 1.0+</span></div>
+    <div class="lrows"${loadOpen ? "" : " hidden"}>${rows.join("")}</div>
+    ${foot ? `<div class="foot">${foot}</div>` : ""}</div>`;
+}
+
 let sb = null, DATA = null, isDemo = false;
 
 // Which night the Day tab is showing. -1 until data lands, then pinned to
@@ -694,6 +741,13 @@ async function loadLive() {
   // stopped coming back at all, and it would fall one more day behind for
   // every day past that. Not the trimInProgressNight placeholder logic --
   // the real row never reached the client to begin with.
+  // The drink dose charts want every night ever, not 45. Seven small columns
+  // per row (~100 bytes), fetched alongside the main query: a few years is
+  // still well under a megabyte. A failure here just leaves D.all unset and
+  // the charts fall back to the 45 loaded nights.
+  const allQ = sb.from("night_summary")
+    .select("night,drinks,hrv_rmssd,hrv_baseline,hrv_deep_rmssd,hrv_deep_baseline,rem_min")
+    .order("night", { ascending: false }).limit(5000);
   const { data: desc, error } = await sb
     .from("night_summary").select("*").order("night", { ascending: false }).limit(45);
   const data = desc ? [...desc].reverse() : desc;
@@ -826,6 +880,19 @@ async function loadLive() {
       .from("sync_state").select("last_sync_at,last_ok,message").eq("id", 1).maybeSingle();
     if (s?.last_sync_at) D.sync = { at: s.last_sync_at, ok: s.last_ok !== false };
   } catch { /* keep the dashboard */ }
+  try {
+    // Newest first then flipped, same as above: if PostgREST's row cap ever
+    // bites, it drops the oldest nights rather than the newest.
+    const all = ((await allQ).data || []).slice().reverse();
+    if (all?.length > data.length) {
+      const col = (k) => all.map((r) => n1(r[k]));
+      D.all = {
+        dates: all.map((r) => r.night), drinks: all.map((r) => Number(r.drinks || 0)),
+        hrv: col("hrv_rmssd"), hrvBaseline: col("hrv_baseline"),
+        hrvDeep: col("hrv_deep_rmssd"), hrvDeepBaseline: col("hrv_deep_baseline"), rem: col("rem_min"),
+      };
+    }
+  } catch { /* keep the 45-night fallback */ }
   return D;
 }
 
@@ -1184,47 +1251,23 @@ function renderDay() {
   updateDayNav(D, i);
 
   const recCol = ringCol(t.recovery, RING_GOOD.recovery);
-  const sober = D.recovery.filter((_, k) => !D.drinks[k] && ok(D.recovery[k]));
-  const recBase = sober.length ? Math.round(sober.reduce((a, b) => a + b, 0) / sober.length) : NaN;
-  // Prefer the trailing-median baseline Postgres already computed for THIS
-  // night (excludes the night itself, windowed to 30 days) over a fallback --
-  // a whole-account mean that includes the very point being scored, which
-  // drifts every past night's percentage retroactively as new nights arrive.
-  // Verified against real data: the two methods gave 77.5% vs 82% for the
-  // same night. Falls back only when the account is too new for a baseline
-  // (fewer than 3 prior nights) or the fixture doesn't carry one (demo.json).
-  const hrvBaseUsed = ok(t.hrvBaseline) ? t.hrvBaseline : ch.slope(D).base;
-  const hrvPct = Math.round((t.hrv / hrvBaseUsed) * 100);
-
-  const strip = t.drinks ? `<div class="strip">
-      <span class="n">${t.drinks}</span>
-      <span class="pips">${"<i></i>".repeat(Math.min(t.drinks, 12))}</span>
-      <span class="txt">drinks the night before${ok(hrvPct) ? ` · HRV <b>${hrvPct}%</b> of your sober average` : ""}${
-        ok(t.recovery) && ok(recBase) ? `, recovery <b>${t.recovery}</b> against a usual <b>${recBase}</b>` : ""}</span></div>` : "";
-
-  const stepsDays = win(D, 30, 14), strainDays = win(D, 21, 10);
-
+  const wos = D.workouts[i] || [];
+  const over = ok(t.target) && t.strain > t.target;
   $("today").innerHTML = `
-    <div class="kpis">
-      ${kpi(ch.gauge(t.strain, 21, ok(t.target) && t.strain > t.target ? col("warn") : col("strain"), "Day Strain", `Day Strain ${t.strain} of 21|waking heart-rate load — sleep doesn't count${ok(t.target) ? `|stay under ${t.target} today${t.loadState > 0 ? " (capped — recovery load)" : ""}` : ""}`), "Day Strain", ok(t.target) ? `under ${t.target}` : "", "strain")}
-      ${kpi(ch.ring(t.recovery, recCol, "Recovery", `Recovery ${t.recovery}|55% HRV · 25% resting HR · 20% sleep`), "Recovery", `${t.recovery >= 67 ? "well recovered" : t.recovery >= 34 ? "moderate" : "low"}${t.drinks ? ` · ${t.drinks} drink${t.drinks > 1 ? "s" : ""}` : ""}`, "recovery")}
-      ${kpi(ch.ring(t.score, ringCol(t.score, RING_GOOD.sleep), "Sleep Score", ok(t.score) ? `Sleep Score ${t.score}|how well + how settled, scaled to how long you slept vs what you needed — more when you're carrying sleep debt` : "No sleep recorded|this night has not been scored"), "Sleep Score", ok(t.asleep) ? hm(t.asleep) : "not yet", "sleep")}
+    <div class="rings">
+      ${ringBtn("strain", t.strain, 21, over ? col("warn") : col("strain"), ok(t.strain) ? t.strain.toFixed(1) : "—", "Strain", ok(t.target) ? `cap ${Math.round(t.target)}` : "&nbsp;")}
+      ${ringBtn("recovery", t.recovery, 100, recCol, ok(t.recovery) ? t.recovery : "—", "Recovery", Number.isInteger(t.loadState) ? `load ${LOAD_WORD[t.loadState]}` : "&nbsp;")}
+      ${ringBtn("sleep", t.score, 100, ringCol(t.score, RING_GOOD.sleep), ok(t.score) ? t.score : "—", "Sleep", ok(t.asleep) ? hm(t.asleep) : "not yet")}
     </div>
-    ${loadBar(t)}
-    ${napBar(D.naps[i] || [])}
-    ${strip}
-    <div class="card"><div class="stats">
-      ${stat(ok(t.hrv) ? t.hrv : "—", "HRV ms", recCol)}${stat(ok(t.rhr) ? t.rhr : "—", "RHR bpm")}
-      ${stat(ok(t.steps) ? t.steps.toLocaleString() : "—", "Steps", col("steps"))}${stat(ok(t.debt) ? hm(t.debt) : "—", "Sleep debt")}
-    </div>${latest ? `<p class="note">Today is still in progress — strain and steps are running
-      totals and keep climbing until midnight.</p>` : ""}</div>
-    ${card(`Heart rate<span class="card-toggles">
+    ${loadReport(t)}
+    <div class="sec"><div class="kv"><span>Sleep debt</span><span class="v">${ok(t.debt) ? hm(t.debt) : "—"}</span><span class="u">need <b class="ub">${ok(t.need) ? hm(t.need) : "—"}</b></span></div></div>
+    ${card(`${latest ? "Today" : "That day"}<span class="card-toggles">
         <button type="button" class="chip-toggle${showDrinks ? " on" : ""}" data-dr-toggle aria-pressed="${showDrinks}"><span class="dot"></span>Drinks</button>
         <button type="button" class="chip-toggle${showSleep ? " on" : ""}" data-sl-toggle aria-pressed="${showSleep}"><span class="dot"></span>Sleep</button>
         <button type="button" class="chip-toggle${showWorkouts ? " on" : ""}" data-wo-toggle aria-pressed="${showWorkouts}"><span class="dot"></span>Workouts</button>
       </span>`, ch.hrIntraday(W, {
         curve: D.curves[i], drinks: showDrinks ? D.drinkTimes[i] : [], hrmax: D.hrmax, rhr: t.rhr,
-        workouts: showWorkouts ? (D.workouts[i] || []) : [],
+        workouts: showWorkouts ? wos : [],
         // D.hypnos[i] is keyed by WAKE date -- this night mostly ran the
         // evening before, so its "start" clock time typically needs to read
         // as yesterday relative to this chart. See nightSpan() in charts.js.
@@ -1232,18 +1275,18 @@ function renderDay() {
         // The Sleep chip is "when was I asleep", so a nap is part of it.
         naps: showSleep ? (D.naps[i] || []) : [],
       }),
-      // The workout bands carry no spelled-out on-chart label any more -- two
-      // sessions an hour apart overlapped into a smear. Each band gets a
-      // numbered badge; this caption, one session per line, decodes the number
-      // and gives its span. Shown only while the bands are.
-      showWorkouts && D.workouts[i]?.length
-        ? D.workouts[i].map((w, k) => {
+      // Numbered workout bands, decoded one per line while they're shown.
+      showWorkouts && wos.length
+        ? wos.map((w, k) => {
             const s = ch.mins(w.start);
             return `${k + 1}: ${ch.workoutLabel(w.type)} · ${ch.clockCompact(s)}-${ch.clockCompact(s + (Number(w.min) || 0))}`;
           }).join("<br>")
         : "")}
-    ${card(`Steps — ${stepsDays} days`, ch.bars(W, D, D.steps, stepsDays, col("steps"), kfmt, "steps"))}
-    ${card(`Strain vs ceiling — ${strainDays} days`, ch.strainHistory(W, D, strainDays))}`;
+    <div class="sec">
+      <div class="kv"><span>Resting heart rate</span><span class="v">${ok(t.rhr) ? t.rhr : "—"}</span><span class="u">${ok(t.rhr) && ok(t.rhrDelta) ? `normal ${Math.round(t.rhr - t.rhrDelta)}` : ""}</span></div>
+      <div class="kv"><span>Strain</span><span class="v">${ok(t.strain) ? t.strain.toFixed(1) : "—"}</span><span class="u">${ok(t.target) ? `cap ${Math.round(t.target)}` : ""}</span></div>
+      <div class="kv"><span>Workouts</span><span class="v">${wos.length}</span><span class="u">${wos.slice(0, 2).map((w) => ch.workoutLabel(w.type)).join(", ")}</span></div>
+    </div>`;
 
   primeReadouts($("dash"));
   if (detailKind) { $("detail-body").innerHTML = renderDetailBody(detailKind); primeReadouts($("detail")); }
@@ -1589,7 +1632,14 @@ $("dash").addEventListener("click", (e) => {
     try { localStorage.setItem(SL_KEY, showSleep ? "1" : "0"); } catch { /* private mode */ }
     return renderDay();
   }
-  const b = e.target.closest?.(".kpi[data-detail], .loadbar[data-detail]");
+  const tog = e.target.closest?.("[data-loadtoggle], [data-metricstoggle], [data-nighttoggle]");
+  if (tog) {
+    if ("loadtoggle" in tog.dataset) loadOpen = !loadOpen;
+    if ("metricstoggle" in tog.dataset) metricsOpen = !metricsOpen;
+    if ("nighttoggle" in tog.dataset) nightOpen = !nightOpen;
+    return renderDay();
+  }
+  const b = e.target.closest?.(".ringbtn[data-detail], .kpi[data-detail], .loadbar[data-detail]");
   if (b) return openDetail(b.dataset.detail);
   const w = e.target.closest?.(".workrow[data-workout-day]");
   if (w) return openWorkoutDay(Number(w.dataset.workoutDay));
@@ -1799,106 +1849,73 @@ function renderDetailBody(kind) {
     const workouts = D.workouts[i] || [];
     const over = ok(t.target) && t.strain > t.target;
     return `
-      <div class="detail-dial">${ch.gauge(t.strain, 21, over ? col("warn") : col("strain"), "Day Strain", `Day Strain ${t.strain} of 21|waking heart-rate load only`)}</div>
-      <p class="note center">${ok(t.target) ? `stay under <b>${t.target}</b> today` : ""}${ok(t.steps) ? ` · <b>${t.steps.toLocaleString()}</b> steps` : ""}</p>
+      ${ringNum(t.strain, 21, over ? col("warn") : col("strain"), ok(t.strain) ? t.strain.toFixed(1) : "—", true)}
       ${card(`Strain vs ceiling — ${strainDays} days`, ch.strainHistory(W, D, strainDays))}
+      ${card(`Steps — ${stepsDays} days`, ch.bars(W, D, D.steps, stepsDays, col("steps"), kfmt, "steps"))}
       ${card("Workouts", workouts.length
         ? `<div class="worklist">${workouts.map((w) => workoutRow(w, i)).join("")}</div>`
-        : `<p class="note" style="margin:0">No workouts detected for this day.</p>`, "", false)}
-      ${card(`Steps — ${stepsDays} days`, ch.bars(W, D, D.steps, stepsDays, col("steps"), kfmt, "steps"))}
-      ${card("Time in zone", `<div class="stats" style="grid-template-columns:repeat(5,1fr)">
-        ${[0, 1, 2, 3, 4].map((k) => stat(Math.round(D.z[k]?.[i] || 0) + "m", "Z" + (k + 1), k ? ZONE[k] : null)).join("")}</div>`, "", false)}
-      <p class="note">Strain is your waking heart-rate load — Banister TRIMP over every sample
-        while you're awake, log-compressed. Sleep is left out: an elevated resting heart
-        rate overnight is your body recovering, not training, and it shows up as low
-        recovery instead. The ceiling scales with recovery — a number to stay under on a
-        low-recovery day, not a target to hit.</p>`;
+        : `<p class="note" style="margin:0">No workouts detected for this day.</p>`, "", false)}`;
   }
 
   if (kind === "recovery") {
     const recCol = ringCol(t.recovery, RING_GOOD.recovery);
     const trendDays = win(D, 30, 14);
-    const hrvBaseUsed = ok(t.hrvBaseline) ? t.hrvBaseline : ch.slope(D).base;
-    const hrvPct = Math.round((t.hrv / hrvBaseUsed) * 100);
-    const hasTemp = Array.isArray(D.skinTempDelta) && D.skinTempDelta.some(ok);
-    const hasRR = Array.isArray(D.respRate) && D.respRate.some(ok);
+    const hrvPct = ok(t.hrv) && ok(t.hrvBaseline) ? Math.round((t.hrv / t.hrvBaseline) * 100) : NaN;
+    const rd = ok(t.rhrDelta) ? Math.round(t.rhrDelta) : NaN;
     const hasDeep = Array.isArray(D.hrvDeepPct) && D.hrvDeepPct.some(ok);
     const hasNonRem = Array.isArray(D.nonRemHr) && D.nonRemHr.some(ok);
-    const hasSpo2Min = Array.isArray(D.spo2Min) && D.spo2Min.some(ok);
-    const deepPct = ok(t.hrvDeepPct) ? Math.round(t.hrvDeepPct) : NaN;
-    const rows = loadRows(t);
-    const cap = t.loadState === 2 ? 8 : t.loadState === 1 ? 11 : NaN;
-    const loadCard = ok(t.bodyLoad) && Number.isInteger(t.loadState)
-      ? `<div class="card loadcard l${t.loadState}">
-          <h2>Recovery load — ${LOAD_WORD[t.loadState]}</h2>
-          ${rows.length ? `<div class="lrows">
-            <div class="lrow lhead"><span></span><span>Last night</span><span>Normal</span></div>
-            ${rows.map(([, name, v, norm, off]) =>
-              `<div class="lrow${off ? " off" : ""}"><span>${name}</span><span>${v}</span><span>${norm}</span></div>`).join("")}
-          </div>` : ""}
-          ${(() => {
-            const foot = [t.sick ? "Sick" : "", t.drinks ? `${t.drinks} drink${t.drinks > 1 ? "s" : ""}` : "", ok(cap) ? `Strain capped at ${cap}` : ""].filter(Boolean);
-            return foot.length ? `<p class="lfoot">${foot.join(" · ")}</p>` : "";
-          })()}</div>`
-      : "";
     return `
-      <div class="detail-dial">${ch.ring(t.recovery, recCol, "Recovery", `Recovery ${t.recovery}|55% HRV · 25% resting HR · 20% sleep`)}</div>
-      <p class="note center">55% HRV · 25% resting heart rate · 20% sleep score, each against your
-        rolling baseline${ok(hrvPct) ? ` — HRV is <b>${hrvPct}%</b> of yours` : ""}${
-        ok(deepPct) ? ` (deep-sleep HRV <b>${deepPct}%</b>)` : ""}.</p>
-      ${loadCard}
+      ${ringNum(t.recovery, 100, recCol, ok(t.recovery) ? t.recovery : "—", true)}
+      <div class="sec">
+        <button type="button" class="hd hdb" data-metricstoggle aria-expanded="${metricsOpen}"><b>Metrics</b><span class="hr">vs your baseline${chev(metricsOpen)}</span></button>
+        <div class="lrows"${metricsOpen ? "" : " hidden"}>
+          <div class="kv"><span>HRV · 55%</span><span class="v">${ok(hrvPct) ? hrvPct + "%" : "—"}</span><span class="u">of normal</span></div>
+          <div class="kv"><span>Resting HR · 25%</span><span class="v">${ok(rd) ? (rd > 0 ? "+" : rd < 0 ? "−" : "") + Math.abs(rd) : "—"}</span><span class="u">bpm</span></div>
+          <div class="kv"><span>Sleep score · 20%</span><span class="v">${ok(t.score) ? t.score : "—"}</span><span class="u">of 100</span></div>
+        </div></div>
+      ${loadReport(t)}
       ${card(`Recovery — ${trendDays} days`, ch.sparkline(W, D, D.recovery, recCol, trendDays, ""))}
       ${card(`HRV (rMSSD) — ${trendDays} days`, ch.sparkline(W, D, D.hrv, col("accent"), trendDays, "ms"))}
-      ${hasDeep ? card(`Deep-sleep HRV vs baseline — ${trendDays} nights`, ch.sparkline(W, D, D.hrvDeepPct, col("accent"), trendDays, "%"),
-        "A true rMSSD measured in deep sleep only — a cleaner autonomic read than the all-night average, and Recovery Load uses it in place of the average once it has a baseline.") : ""}
-      ${card(`Resting heart rate — ${trendDays} days`, ch.sparkline(W, D, D.rhr, col("warn"), trendDays, "bpm"))}
-      ${hasNonRem ? card(`Non-REM resting HR — ${trendDays} nights`, ch.sparkline(W, D, D.nonRemHr, col("warn"), trendDays, "bpm"),
-        "Resting HR measured in stable non-REM sleep — the RHR analogue of the deep-sleep HRV lens.") : ""}
-      ${hasTemp ? card(`Skin temperature vs baseline — ${trendDays} nights`, ch.sparkline(W, D, D.skinTempDelta, col("warn"), trendDays, "°C")) : ""}
-      ${hasRR ? card(`Respiratory rate — ${trendDays} nights`, ch.sparkline(W, D, D.respRate, col("accent"), trendDays, "br/min")) : ""}
-      ${hasSpo2Min ? card(`Blood-oxygen low — ${trendDays} nights`, ch.sparkline(W, D, D.spo2Min, col("accent"), trendDays, "%"),
-        "The night's lowest SpO₂, from the range the API reports. A low floor or a wide swing points at breathing — congestion, a cold, altitude. Too coarse for an apnea screen.") : ""}
-      ${card(`Sleep Score — ${trendDays} nights`, ch.sparkline(W, D, D.score, col("rem"), trendDays, ""))}`;
+      ${hasDeep ? card(`Deep-sleep HRV vs baseline — ${trendDays} nights`, ch.sparkline(W, D, D.hrvDeepPct, col("accent"), trendDays, "%")) : ""}
+      ${hasNonRem ? card(`Non-REM resting HR — ${trendDays} nights`, ch.sparkline(W, D, D.nonRemHr, col("warn"), trendDays, "bpm")) : ""}`;
   }
 
-  // sleep — same "last slept night" fallback renderDay() used to, back when
-  // this was its own tab, so a day with no sleep yet drills into last
-  // night's rather than a blank ring.
+  // sleep -- a day with no sleep yet drills into the last slept night rather
+  // than a blank ring.
   const slept = ok(t.asleep) && ok(t.deep);
   const sn = slept ? t : lastSleptNight(D, i) ?? t;
   const sIdx = slept ? i : sn.i ?? i;
   const hyp = D.hypnos[sIdx];
-  const remDays = win(D, 30, 14), colDays = win(D, 14, 7), debtDays = win(D, 30, 14);
-  // Tonight's need, mirroring sleep_series() server-side (metrics.py): a flat
-  // personal baseline (7h) plus up to 30 min the night after a hard day, using
-  // today's strain so far as that "previous day" input. Debt is deliberately
-  // NOT folded in -- it is tracked and shown on its own, not as a moving
-  // target. Only shown on the latest day; a past night's own sn.need already
-  // says what it needed.
-  const NEED_MIN = 420, GOAL_MIN = 480;
-  const tonightNeed = i === D.dates.length - 1 && ok(D.strain[i])
-    ? NEED_MIN + Math.min(30, 3 * Math.max(0, D.strain[i] - 10))
-    : NaN;
-  // How the score judged this night: need, plus a capped slice of the debt
-  // carried in. When that's bigger than the bare need, a flat 7h night is
-  // being measured against ~8h and can't score a clean 90.
-  const debtBump = ok(sn.scoreTarget) && ok(sn.need) ? sn.scoreTarget - sn.need : 0;
+  const remDays = win(D, 30, 14), debtDays = win(D, 30, 14);
+  const debt = ok(sn.debt) ? sn.debt : 0, need = ok(sn.need) ? sn.need : 420;
+  const debtCol = debt < 60 ? col("good") : debt < 180 ? col("awake") : col("warn");
+  const tot = sn.asleep, share = (m) => (ok(tot) && tot && ok(m) ? Math.round((100 * m) / tot) + "% of night" : "");
+  const short = ok(tot) && need - tot >= 30;
   return `
     ${slept ? "" : `<div class="banner">No sleep recorded for <b>${t.night}</b> — showing the night of
       <b>${sn.night ?? "the last full night"}</b>.</div>`}
-    <div class="detail-dial">${ch.ring(sn.score, ringCol(sn.score, RING_GOOD.sleep), "Sleep Score", ok(sn.score) ? `Sleep Score ${sn.score}|how well + how settled, × the fraction of ${hm(ok(sn.scoreTarget) ? sn.scoreTarget : sn.need)} you slept` : "No sleep recorded|this night has not been scored")}</div>
-    <p class="note center">${ok(sn.asleep) ? `<b>${hm(sn.asleep)}</b> asleep of <b>${hm(sn.need)}</b> needed${ok(sn.asleep) && sn.asleep >= GOAL_MIN ? " · hit your 8h goal" : ""}` : "not yet scored"}</p>
-    <div class="card"><div class="stats">
-      ${stat(ok(sn.asleep) ? hm(sn.asleep) : "—", "Asleep")}${stat(ok(sn.eff) ? sn.eff + "%" : "—", "Efficiency")}
-      ${stat(ok(sn.need) ? hm(sn.need) : "—", "Needed last night")}${stat(ok(sn.score) ? sn.score : "—", "Sleep Score", sn.score >= 80 ? col("good") : col("awake"))}
-    </div>${debtBump > 5 ? `<p class="note">Scored against <b>${hm(sn.scoreTarget)}</b> — your ${hm(sn.need)} need plus <b>${hm(debtBump)}</b> because you went in carrying sleep debt. Sleep long or pay the debt down and the same night scores higher.</p>` : ok(tonightNeed) ? `<p class="note">Needed tonight: <b>${hm(tonightNeed)}</b> — a flat 7h baseline${tonightNeed > NEED_MIN ? ", plus a little for today's exertion" : ""}. Carrying debt raises the bar the score is measured against; your 8h goal is the stretch target.</p>` : ""}</div>
-    ${card("Hypnogram", ch.hypnogram(W, hyp))}
-    ${napCards(D.naps[i] || [])}
+    ${ringNum(sn.score, 100, ringCol(sn.score, RING_GOOD.sleep), ok(sn.score) ? sn.score : "—", true)}
+    <div class="debt">
+      <div class="dl"><div><span>Sleep debt</span><b style="color:${debtCol}">${hm(debt)}</b></div><div class="dr"><span>Need tonight</span><b>${hm(need)}</b></div></div>
+      <div class="dbar"><i style="width:${Math.min(100, (debt / 300) * 100).toFixed(1)}%;background:${debtCol}"></i></div>
+      <div class="dc"><span>0</span><span>5h</span></div>
+    </div>
+    <div class="sec">
+      <button type="button" class="hd hdb" data-nighttoggle aria-expanded="${nightOpen}"><b>The night</b><span class="hr">${ok(tot) ? hm(tot) + " asleep" : "not yet scored"}${chev(nightOpen)}</span></button>
+      <div class="lrows"${nightOpen ? "" : " hidden"}>
+        <div class="kv${short ? " short" : ""}"><span>Asleep</span><span class="v">${hmc(tot)}</span><span class="u">need ${hmc(need)}</span></div>
+        <div class="kv"><span>REM</span><span class="v">${hmc(sn.rem)}</span><span class="u">${share(sn.rem)}</span></div>
+        <div class="kv"><span>Deep</span><span class="v">${hmc(sn.deep)}</span><span class="u">${share(sn.deep)}</span></div>
+        <div class="kv"><span>Light</span><span class="v">${hmc(sn.light)}</span><span class="u">${share(sn.light)}</span></div>
+        <div class="kv"><span>Awake</span><span class="v">${hmc(sn.awake)}</span><span class="u">${ok(sn.eff) ? sn.eff + "% efficiency" : ""}</span></div>
+      </div></div>
+    ${card("Sleep stages", ch.hypnogram(W, hyp))}
     ${card("Heart rate during sleep", ch.hrIntraday(W, { curve: sleepHrCurve(D, sIdx, hyp), hrmax: D.hrmax, rhr: sn.rhr }))}
-    ${card(`REM — ${remDays} nights`, ch.sparkline(W, D, D.rem, col("rem"), remDays, "min"))}
     ${card("Stages vs your 30-night baseline", ch.stagesVsBaseline(W, D, sn), "", false)}
-    ${card(`Sleep consistency — last ${colDays} nights`, ch.sleepColumns(W, D, colDays))}
-    ${card(`Sleep debt — ${debtDays} days`, ch.debtArea(W, D, debtDays))}`;
+    ${card(`Sleep debt — ${debtDays} days`, ch.debtArea(W, D, debtDays))}
+    ${card(`Sleep Score — ${remDays} nights`, ch.sparkline(W, D, D.score, col("rem"), remDays, ""))}
+    ${card(`REM — ${remDays} nights`, ch.sparkline(W, D, D.rem, col("rem"), remDays, "min"))}
+    ${napCards(D.naps[i] || [])}`;
 }
 
 // ----------------------------------------------------------------- workouts
@@ -1960,7 +1977,13 @@ function renderWorkoutsTab(D) {
       <button type="button" class="sicknow${sickTonight ? " on" : ""}" data-sick-toggle aria-pressed="${sickTonight}">
         ${sickTonight ? "Sick tonight · logged" : "Sick tonight"}
       </button>
-    </div>`;
+    </div>
+    ${(() => {
+      const last = D.dates.length - 1, rows = [];
+      for (let k = last; k >= Math.max(0, last - 2); k--) for (const w of [...(D.workouts[k] || [])].reverse()) rows.push(workoutRow(w, k));
+      return `<div class="sec past3"><div class="hd"><b>Past 3 days</b><span>${rows.length} session${rows.length === 1 ? "" : "s"}</span></div>
+        ${rows.length ? `<div class="worklist">${rows.join("")}</div>` : `<p class="note" style="margin:0">No workouts in the past 3 days.</p>`}</div>`;
+    })()}`;
 }
 
 // Own month cursor, independent of calYear/calMonth above -- browsing March
@@ -2030,7 +2053,37 @@ function renderDrinksTab(D) {
         <span class="plus">+</span> Log drink now
       </button>
     </div>
-    ${tn.length ? `<div class="aftercal">${nowBlock}${bedPlanner(D, tn)}</div>` : ""}`;
+    ${tn.length ? `<div class="aftercal">${nowBlock}${bedPlanner(D, tn)}</div>` : ""}
+    ${lastNightOut(D)}`;
+  primeReadouts($("drinks"));
+}
+
+// The most recent drinking night before tonight: the heart-rate chart across
+// it (same chart as the drinks sheet) and the next morning against your normal.
+// Normal for REM is the median of the 30 prior mornings with no drinks.
+function lastNightOut(D) {
+  let i = -1;
+  for (let k = D.dates.length - 1; k >= 0; k--) if ((D.nightRows[k] || []).length && k < D.dates.length - 1) { i = k; break; }
+  if (i < 0) return "";
+  const rows = D.nightRows[i], m = i + 1, curve = drinkingHrCurve(D, i), r = Math.round;
+  const t12 = (d) => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: clockTz() });
+  const sober = [];
+  for (let k = Math.max(0, m - 30); k < m; k++) if (!D.drinks[k] && ok(D.rem[k])) sober.push(D.rem[k]);
+  sober.sort((a, b) => a - b);
+  const remNorm = sober.length > 2 ? sober[sober.length >> 1] : NaN;
+  const hrvPct = ok(D.hrv[m]) && ok(D.hrvBaseline[m]) ? (100 * D.hrv[m]) / D.hrvBaseline[m] : NaN;
+  const rep = [
+    ok(hrvPct) ? repRow("HRV", r(hrvPct), "%", "100%", 100 - hrvPct >= 8 ? "low" : "") : "",
+    ok(D.nonRemHr[m]) && ok(D.nonRemHrDelta[m]) ? repRow("Sleep heart rate", r(D.nonRemHr[m]), "bpm", r(D.nonRemHr[m] - D.nonRemHrDelta[m]), D.nonRemHrDelta[m] >= 2 ? "high" : "") : "",
+    ok(D.rem[m]) && ok(remNorm) ? repRow("REM", r(D.rem[m]), "min", r(remNorm), remNorm - D.rem[m] >= 15 ? "low" : "") : "",
+    ok(D.asleep[m]) ? repRow("Asleep", hmc(D.asleep[m]), "", hmc(ok(D.need[m]) ? D.need[m] : 420), (ok(D.need[m]) ? D.need[m] : 420) - D.asleep[m] >= 30 ? "low" : "") : "",
+  ].join("");
+  return `<div class="lastout"><div class="sec">
+      <div class="hd"><b>${ch.dlabel(D.dates[i])}</b><span>${rows.length} drink${rows.length > 1 ? "s" : ""} · ${t12(rows[0].logged_at)} – ${t12(rows[rows.length - 1].logged_at)}</span></div>
+    </div>
+    ${curve ? card("Heart rate while drinking", ch.hrIntraday(W, { curve, drinks: D.nightTimes[i], session: true, hrmax: D.hrmax, rhr: D.rhr[i] })) : ""}
+    ${m < D.dates.length && rep ? `<div class="sec"><div class="hd"><b>Next morning</b><span></span></div>${rep}
+      <div class="foot">Recovery ${ok(D.recovery[m]) ? D.recovery[m] : "—"} · sleep score ${ok(D.score[m]) ? D.score[m] : "—"}</div></div>` : ""}</div>`;
 }
 
 // The dose-response chart pools every night the account has ever had -- more
@@ -2055,6 +2108,7 @@ function renderTrends(D) {
 // paragraph. HRV and REM share one card behind a toggle; opens on HRV.
 let doseMetric = "hrv";
 function renderDoseCard(D) {
+  D = D.all || D;
   const nights = D.drinks.filter(Boolean).length;
   const hrv = doseMetric === "hrv";
   const head = hrv ? `${ch.slope(D).m.toFixed(1)}% of baseline HRV per drink` : remHead(D);
@@ -2271,8 +2325,9 @@ const RANGE_PRESETS = [7, 14, 30, 90];
 // account has in it.
 function pickDefaultRange(D) {
   const have = D.dates.length;
-  const fit = RANGE_PRESETS.find((n) => n >= have) ?? RANGE_PRESETS[RANGE_PRESETS.length - 1];
-  return isNarrow() ? Math.min(fit, 7) : fit;
+  // 30 days, or less while the account is younger than that -- long enough to
+  // usually include a drinking night, so the drink dots have something to mark.
+  return Math.min(30, RANGE_PRESETS.find((n) => n >= have) ?? 30);
 }
 
 function renderTrendCharts(D, days) {
