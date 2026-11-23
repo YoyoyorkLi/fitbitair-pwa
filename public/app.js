@@ -166,12 +166,18 @@ function ringSVG(v, max, color, sw = 7) {
     `<circle cx="50" cy="50" r="${R}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round" stroke-dasharray="${(L * f).toFixed(1)} ${L.toFixed(1)}" transform="rotate(-90 50 50)"/></svg>`;
 }
 const ringNum = (v, max, color, num, big) =>
-  `<div class="ring${big ? " lg" : ""}">${ringSVG(v, max, color, big ? 10 : 7)}<span class="n" style="color:${color}"><span class="nv">${num}</span></span></div>`;
+  `<div class="ring${big ? " lg" : ""}">${ringSVG(v, max, color, big ? 10 : 7)}<span class="n" style="color:${col(ok(v) ? "text" : "dim")}"><span class="nv">${num}</span></span></div>`;
 const ringBtn = (kind, v, max, color, num, label, sub) =>
   `<button type="button" class="ringbtn" data-detail="${kind}">${ringNum(v, max, color, num)}<span class="rl">${label}</span><span class="rs">${sub}</span></button>`;
 const chev = (open) => `<svg class="chev${open ? " open" : ""}" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`;
 const repRow = (name, v, unit, normal, flag) =>
   `<div class="row${flag ? " out" : ""}"><span class="nm">${name}</span><span class="f">${flag || ""}</span><span class="v">${v}${unit ? `<small>${unit}</small>` : ""}</span><span class="nl">normal ${normal}</span></div>`;
+// What tonight's sleep score will be judged against, mirroring metrics.py:
+// SLEEP_NEED_MIN (7h) + up to 30 min after a hard day (3 min per strain point
+// over 10) + 35% of the debt you carry in, capped at 1.5h. sleep_need_min in
+// the database is only the first two parts, which is why it read a flat 7h.
+const needTonight = (t) => Math.round(420 + Math.min(30, 3 * Math.max(0, (ok(t.strain) ? t.strain : 0) - 10))
+  + Math.min(90, 0.35 * Math.max(0, ok(t.debt) ? t.debt : 0)));
 const hmc = (m) => (ok(m) ? `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, "0")}` : "—");
 
 // Recovery load: the header (state chip, score out of 3) is always shown; the
@@ -1260,12 +1266,8 @@ function renderDay() {
       ${ringBtn("sleep", t.score, 100, ringCol(t.score, RING_GOOD.sleep), ok(t.score) ? t.score : "—", "Sleep", ok(t.asleep) ? hm(t.asleep) : "not yet")}
     </div>
     ${loadReport(t)}
-    <div class="sec"><div class="kv"><span>Sleep debt</span><span class="v">${ok(t.debt) ? hm(t.debt) : "—"}</span><span class="u">need <b class="ub">${ok(t.need) ? hm(t.need) : "—"}</b></span></div></div>
-    ${card(`${latest ? "Today" : "That day"}<span class="card-toggles">
-        <button type="button" class="chip-toggle${showDrinks ? " on" : ""}" data-dr-toggle aria-pressed="${showDrinks}"><span class="dot"></span>Drinks</button>
-        <button type="button" class="chip-toggle${showSleep ? " on" : ""}" data-sl-toggle aria-pressed="${showSleep}"><span class="dot"></span>Sleep</button>
-        <button type="button" class="chip-toggle${showWorkouts ? " on" : ""}" data-wo-toggle aria-pressed="${showWorkouts}"><span class="dot"></span>Workouts</button>
-      </span>`, ch.hrIntraday(W, {
+    <div class="sec"><div class="kv debtrow"><span>Sleep debt</span><span class="v">${ok(t.debt) ? hm(t.debt) : "—"}</span><span class="u">need <b class="ub">${ok(t.debt) ? hm(needTonight(t)) : "—"}</b></span></div></div>
+    ${card(latest ? "Today" : "That day", ch.hrIntraday(W, {
         curve: D.curves[i], drinks: showDrinks ? D.drinkTimes[i] : [], hrmax: D.hrmax, rhr: t.rhr,
         workouts: showWorkouts ? wos : [],
         // D.hypnos[i] is keyed by WAKE date -- this night mostly ran the
@@ -1281,7 +1283,11 @@ function renderDay() {
             const s = ch.mins(w.start);
             return `${k + 1}: ${ch.workoutLabel(w.type)} · ${ch.clockCompact(s)}-${ch.clockCompact(s + (Number(w.min) || 0))}`;
           }).join("<br>")
-        : "")}
+        : "").replace('<div class="chartbox', `<div class="card-toggles hrchips">
+        <button type="button" class="chip-toggle${showDrinks ? " on" : ""}" data-dr-toggle aria-pressed="${showDrinks}"><span class="dot"></span>Drinks</button>
+        <button type="button" class="chip-toggle${showSleep ? " on" : ""}" data-sl-toggle aria-pressed="${showSleep}"><span class="dot"></span>Sleep</button>
+        <button type="button" class="chip-toggle${showWorkouts ? " on" : ""}" data-wo-toggle aria-pressed="${showWorkouts}"><span class="dot"></span>Workouts</button>
+      </div><div class="chartbox`)}
     <div class="sec">
       <div class="kv"><span>Resting heart rate</span><span class="v">${ok(t.rhr) ? t.rhr : "—"}</span><span class="u">${ok(t.rhr) && ok(t.rhrDelta) ? `normal ${Math.round(t.rhr - t.rhrDelta)}` : ""}</span></div>
       <div class="kv"><span>Strain</span><span class="v">${ok(t.strain) ? t.strain.toFixed(1) : "—"}</span><span class="u">${ok(t.target) ? `cap ${Math.round(t.target)}` : ""}</span></div>
@@ -1887,7 +1893,7 @@ function renderDetailBody(kind) {
   const sIdx = slept ? i : sn.i ?? i;
   const hyp = D.hypnos[sIdx];
   const remDays = win(D, 30, 14), debtDays = win(D, 30, 14);
-  const debt = ok(sn.debt) ? sn.debt : 0, need = ok(sn.need) ? sn.need : 420;
+  const debt = ok(sn.debt) ? sn.debt : 0, need = ok(sn.need) ? sn.need : 420, tonight = needTonight(sn);
   const debtCol = debt < 60 ? col("good") : debt < 180 ? col("awake") : col("warn");
   const tot = sn.asleep, share = (m) => (ok(tot) && tot && ok(m) ? Math.round((100 * m) / tot) + "% of night" : "");
   const short = ok(tot) && need - tot >= 30;
@@ -1896,7 +1902,7 @@ function renderDetailBody(kind) {
       <b>${sn.night ?? "the last full night"}</b>.</div>`}
     ${ringNum(sn.score, 100, ringCol(sn.score, RING_GOOD.sleep), ok(sn.score) ? sn.score : "—", true)}
     <div class="debt">
-      <div class="dl"><div><span>Sleep debt</span><b style="color:${debtCol}">${hm(debt)}</b></div><div class="dr"><span>Need tonight</span><b>${hm(need)}</b></div></div>
+      <div class="dl"><div><span>Sleep debt</span><b style="color:${debtCol}">${hm(debt)}</b></div><div class="dr"><span>Need tonight</span><b>${hm(tonight)}</b></div></div>
       <div class="dbar"><i style="width:${Math.min(100, (debt / 300) * 100).toFixed(1)}%;background:${debtCol}"></i></div>
       <div class="dc"><span>0</span><span>5h</span></div>
     </div>

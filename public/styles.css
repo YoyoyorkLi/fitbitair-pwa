@@ -579,3 +579,9 @@ h1{font-size:22px;font-weight:600;letter-spacing:-.01em;margin:0}
 .detail .kv .u,.detail .row .nl{font-size:11.5px}
 .detail .row{grid-template-columns:1fr auto 66px 88px}
 .past3,.lastout{margin-top:36px}
+/* Day tab: a little more air between sections, and under the date bar. */
+#today .rings{margin-top:22px;margin-bottom:36px}
+#today .sec,#today .card{margin-bottom:36px}
+.hrchips{margin:2px 0 12px}
+.debtrow>span:first-child{font-weight:700;font-size:15px}
+.kv{grid-template-columns:1fr 84px 112px}
