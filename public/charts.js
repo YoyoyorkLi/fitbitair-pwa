@@ -343,9 +343,9 @@ export const WZONE = [col("light"), col("good"), col("awake"), col("warn")];
 // bands) -- green at the low end, red at the top, so "how hard was this moment"
 // reads at a glance without a zone-shaded background behind it. The old
 // translucent band fill is gone: the line carries the whole story.
-const HR_GRADIENT = ["#3FD68A", "#A3D639", "#F2CB3B", "#F2A93B", "#F2545B"];
-const zoneEdges5 = (rhr, hrmax) => { const res = hrmax - rhr; return [0, 0.6, 0.7, 0.8, 0.9, 1].map((f) => rhr + res * f); };
-const zoneIndex5 = (bpm, edges) => { for (let k = 0; k < 4; k++) { if (bpm < edges[k + 1]) return k; } return 4; };
+export const HR_GRADIENT = ["#3FD68A", "#A3D639", "#F2CB3B", "#F2A93B", "#F2545B"];
+export const zoneEdges5 = (rhr, hrmax) => { const res = hrmax - rhr; return [0, 0.6, 0.7, 0.8, 0.9, 1].map((f) => rhr + res * f); };
+export const zoneIndex5 = (bpm, edges) => { for (let k = 0; k < 4; k++) { if (bpm < edges[k + 1]) return k; } return 4; };
 
 /**
  * One civil day of heart rate, with Karvonen zone bands and drink markers.
